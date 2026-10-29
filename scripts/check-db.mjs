@@ -11,6 +11,11 @@ const requiredConstraints=['fk_asset_creator_tenant','fk_appraisal_asset_tenant'
   'fk_appraisal_editor_tenant','fk_comparable_asset_tenant','fk_comparable_creator_tenant',
   'fk_workflow_asset_tenant','fk_workflow_actor_tenant','fk_audit_actor_tenant'];
 
+const requiredChecks=['chk_asset_area_nonnegative','chk_asset_status','chk_asset_legal_status',
+  'chk_appraisal_market_value','chk_appraisal_liquidation','chk_appraisal_base_haircut',
+  'chk_appraisal_risk_haircut','chk_appraisal_total_haircut','chk_comparable_price',
+  'chk_comparable_area','chk_workflow_to_status','chk_login_attempts_nonnegative'];
+
 const dir=fileURLToPath(new URL('../migrations/postgres/',import.meta.url));
 const files=(await readdir(dir)).filter(f=>/^\d{4}_[a-z0-9_]+\.sql$/.test(f)).sort();
 const db=getPostgres({useDirect:true});
@@ -25,6 +30,11 @@ try {
     WHERE connamespace = current_schema()::regnamespace AND contype='f'`);
   const fkSet=new Set(constraints.rows.map(x=>x.conname));
   for(const name of requiredConstraints) if(!fkSet.has(name)) throw new Error('Missing tenant FK: '+name);
+  const enforcedChecks=await client.query(`SELECT conname FROM pg_constraint
+    WHERE connamespace=current_schema()::regnamespace AND contype='c'`);
+  const presentChecks=new Set(enforcedChecks.rows.map(x=>x.conname));
+  for(const check of requiredChecks)
+    if(!presentChecks.has(check)) throw new Error('Missing financial/status check: '+check);
   const activeTriggers=await client.query(`SELECT tgname
     FROM pg_trigger WHERE NOT tgisinternal AND tgenabled IN ('O','A')`);
   const triggerSet=new Set(activeTriggers.rows.map(x=>x.tgname));
@@ -51,7 +61,7 @@ try {
       WHERE l.tenant_id<>u.tenant_id) AS audit`);
   if(Object.values(unsafe.rows[0]).some(x=>Number(x)!==0)) throw new Error('Cross-tenant data relation detected');
   await client.query('COMMIT');
-  console.log('PASS: PostgreSQL schema checksums, required tables, tenant FK constraints, immutable audit triggers, cross-tenant data integrity');
+  console.log('PASS: PostgreSQL schema checksums, required tables, tenant FK constraints, immutable audit triggers, financial and status checks, cross-tenant data integrity');
 }catch(error) {
   try{await client.query('ROLLBACK');}catch{}
   console.error('PostgreSQL preflight FAILED:',error.message);
