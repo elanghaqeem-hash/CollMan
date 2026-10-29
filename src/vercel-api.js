@@ -192,13 +192,16 @@ async function api(request,env,db){
       const data=await readBody(request),weights=await tenantWeights(db,actor.tenant_id);
       const calc=calculateValuation(data,weights);
       const notes=safeNote(data.notes),date=/^\d{4}-\d{2}-\d{2}$/.test(data.valuation_date||'')?data.valuation_date:new Date().toISOString().slice(0,10);
-      await run(db,`INSERT INTO appraisals (id,tenant_id,asset_id,market_value,base_haircut_pct,risk_haircut_pct,total_haircut_pct,liquidation_value,risk_flags_json,valuation_date,notes,updated_by)
+      await db.transaction(async tx=>{
+        await lockEditableAsset(tx,actor,id);
+        await run(tx,`INSERT INTO appraisals (id,tenant_id,asset_id,market_value,base_haircut_pct,risk_haircut_pct,total_haircut_pct,liquidation_value,risk_flags_json,valuation_date,notes,updated_by)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(asset_id) DO UPDATE SET market_value=excluded.market_value,base_haircut_pct=excluded.base_haircut_pct,
       risk_haircut_pct=excluded.risk_haircut_pct,total_haircut_pct=excluded.total_haircut_pct,liquidation_value=excluded.liquidation_value,
       risk_flags_json=excluded.risk_flags_json,valuation_date=excluded.valuation_date,notes=excluded.notes,updated_by=excluded.updated_by,updated_at=datetime('now')`,
       uuid(),actor.tenant_id,id,calc.market_value,calc.base_haircut_pct,calc.risk_haircut_pct,calc.total_haircut_pct,calc.liquidation_value,JSON.stringify(calc.risk_flags),date,notes,actor.id);
-      await run(db,'UPDATE assets SET updated_at=datetime(\'now\') WHERE id=? AND tenant_id=?',id,actor.tenant_id);
-      await audit(db,actor,'APPRAISAL',id,'UPSERT',{market_value:calc.market_value,total_haircut_pct:calc.total_haircut_pct,liquidation_value:calc.liquidation_value});
+        await run(tx,'UPDATE assets SET updated_at=datetime(\'now\') WHERE id=? AND tenant_id=?',id,actor.tenant_id);
+        await audit(tx,actor,'APPRAISAL',id,'UPSERT',{market_value:calc.market_value,total_haircut_pct:calc.total_haircut_pct,liquidation_value:calc.liquidation_value});
+      });
       return response({ok:true,calculation:calc});
     }
     if(sub==='comparables'&&request.method==='POST'){
