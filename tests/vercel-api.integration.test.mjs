@@ -118,6 +118,15 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
     {code:'23514'}
   );
   assert.equal((await call('PUT','/api/assets/'+id+'/appraisal',{market_value:2,base_haircut_pct:1},maker)).status,403);
+  await assert.rejects(
+    db.prepare('UPDATE appraisals SET liquidation_value=market_value+1 WHERE asset_id=?').bind(id).run(),
+    {code:'23514'}
+  );
+  await assert.rejects(
+    db.prepare('UPDATE assets SET status=? WHERE id=?').bind('UNRECOGNIZED',id).run(),
+    {code:'23514'}
+  );
+
   await db.prepare('INSERT INTO tenants(id,name) VALUES (?,?)').bind('test-tenant-2','UAT B').run();
   await db.prepare('INSERT INTO users(id,tenant_id,email,display_name,role,password_hash,password_salt) VALUES (?,?,?,?,?,?,?)')
     .bind('test-other-maker','test-tenant-2','other@uat.example','Other maker','MAKER','0'.repeat(64),'0'.repeat(32)).run();
