@@ -1,7 +1,7 @@
 import {escapeText, currency, riskLabels, statusText, actionText} from './helpers.js';
 import {requestApi as api,validateMetadata} from './api-client.js';
 const app=document.getElementById('app');
-const state={user:null,needSetup:false,configError:'',view:'dashboard',dashboard:null,list:null,detail:null,settings:null,users:null,audit:null,search:'',status:'',edit:false,mobile:false,busy:false};
+const state={user:null,needSetup:false,configError:'',view:'dashboard',dashboard:null,list:null,detail:null,settings:null,users:null,audit:null,integrations:null,search:'',status:'',edit:false,mobile:false,busy:false};
 const esc=escapeText;
 const money=currency;
 const btn=(name,text,kind='')=>`<button type="button" class="btn ${kind}" data-action="${name}">${text}</button>`;
@@ -23,16 +23,16 @@ function renderAuth(){
  <button type="submit" class="btn primary">${setup?'Aktivasi Administrator':'Masuk ke CollMan'}</button></form>`:''}
  <div class="auth-powered">Akses terbatas • Sesi 12 jam • Segregation of duties</div></div></div></div>`;
 }
-const NAV=[['dashboard','◫','Dashboard'],['assets','▦','Register Agunan'],['workflow','⇄','Workflow Persetujuan'],['report','▤','Laporan & Analitik'],['audit','◷','Audit Trail'],['settings','⚙','Parameter Risiko'],['users','♙','Manajemen Pengguna']];
+const NAV=[['dashboard','◫','Dashboard'],['assets','▦','Register Agunan'],['workflow','⇄','Workflow Persetujuan'],['report','▤','Laporan & Analitik'],['audit','◷','Audit Trail'],['settings','⚙','Parameter Risiko'],['users','♙','Manajemen Pengguna'],['integrations','◎','Kesiapan Integrasi']];
 function renderShell(){
- const nav=NAV.filter(([key])=>!['audit','settings','users'].includes(key)|| (key==='audit'?['ADMIN','AUDITOR'].includes(state.user.role):key==='settings'?true:state.user.role==='ADMIN'));
+ const nav=NAV.filter(([key])=>(!['audit','settings','users'].includes(key)|| (key==='audit'?['ADMIN','AUDITOR'].includes(state.user.role):key==='settings'?true:state.user.role==='ADMIN')) && (key!=='integrations'||['ADMIN','AUDITOR'].includes(state.user.role)));
  const active=NAV.find(x=>x[0]===state.view)?.[2]||'CollMan';
  app.innerHTML=`<div class="shell"><div class="mobile-overlay" ${state.mobile?'':'hidden'} data-action="sidebar-close"></div><aside class="sidebar ${state.mobile?'open':''}"><div class="brand"><span class="brand-mark">C</span><span><strong>CollMan</strong><small>COLLATERAL MANAGEMENT</small></span></div><div><div class="nav-label">WORKSPACE</div><nav class="nav">${nav.map(([k,icon,label])=>`<button type="button" data-nav="${k}" class="${k===state.view?'active':''}"><span class="ico">${icon}</span><span>${label}</span></button>`).join('')}</nav></div><div class="side-footer"><strong>${esc(state.user.display_name)}</strong>${esc(state.user.role)} · ${esc(state.user.email)}<button type="button" data-action="password">Ganti Password</button><button type="button" data-action="logout">⇥ &nbsp; Keluar dari sistem</button></div></aside><div class="main"><header class="topbar"><div class="top-right"><button class="icon-btn mobile-menu" data-action="sidebar-toggle">☰</button><span class="breadcrumbs">Workspace / <strong>${esc(active)}</strong></span></div><div class="top-right"><span class="small muted">${esc(state.user.role)}</span><span class="top-avatar">${esc(state.user.display_name.slice(0,1).toUpperCase())}</span></div></header><div class="main-body" id="page"></div></div></div>`;
  renderContent();
 }
 function head(label,title,desc,buttons=''){return `<div class="pagehead"><div><div class="eyebrow">${esc(label)}</div><h1>${esc(title)}</h1><p>${esc(desc)}</p></div><div class="actions">${buttons}</div></div>`;}
 function renderContent(){const el=document.getElementById('page');if(!el)return;
- switch(state.view){case 'dashboard':el.innerHTML=dashboard();break;case 'assets':el.innerHTML=assets();break;case 'asset':el.innerHTML=assetDetail();break;case 'assetform':el.innerHTML=assetForm();break;case 'workflow':el.innerHTML=workflow();break;case 'report':el.innerHTML=report();break;case 'settings':el.innerHTML=settings();break;case 'users':el.innerHTML=users();break;case 'audit':el.innerHTML=audit();break;case 'password':el.innerHTML=passwordForm();break;default:el.innerHTML=empty('Tidak ditemukan','Pilih menu di samping.');}}
+ switch(state.view){case 'dashboard':el.innerHTML=dashboard();break;case 'assets':el.innerHTML=assets();break;case 'asset':el.innerHTML=assetDetail();break;case 'assetform':el.innerHTML=assetForm();break;case 'workflow':el.innerHTML=workflow();break;case 'report':el.innerHTML=report();break;case 'settings':el.innerHTML=settings();break;case 'users':el.innerHTML=users();break;case 'audit':el.innerHTML=audit();break;case 'integrations':el.innerHTML=integrationsView();break;case 'password':el.innerHTML=passwordForm();break;default:el.innerHTML=empty('Tidak ditemukan','Pilih menu di samping.');}}
 async function loadView(){
  state.busy=true;renderShell();document.getElementById('page').innerHTML=`<div class="card">Memuat data…</div>`;
  try{
@@ -42,8 +42,23 @@ async function loadView(){
   if(state.view==='settings')state.settings=await api('/api/settings');
   if(state.view==='users')state.users=await api('/api/users');
   if(state.view==='audit')state.audit=await api('/api/audit');
+  if(state.view==='integrations')state.integrations=await api('/api/integrations');
   renderShell();
  }catch(e){renderShell();document.getElementById('page').innerHTML=`<div class="card bad-config">${esc(e.message)}</div>`;notify(e.message,true);}finally{state.busy=false;}}
+function integrationsView(){
+ const ready=state.integrations||{connectors:{}};
+ const labels={atr_bpn:'ATR/BPN (legalitas)',ocr:'OCR dokumen',ai_appraisal:'AI appraisal',spatial_provider:'Peta spasial resmi'};
+ const rows=Object.entries(labels).map(([key,label])=>{
+  const v=ready.connectors[key]||{status:'NOT_CONFIGURED'};
+  const msg=v.status==='NOT_CONFIGURED'?'Belum ada konektor/credential':
+    'Konfigurasi ada, koneksi dan hasil belum diverifikasi';
+  return '<tr><td><strong>'+esc(label)+'</strong></td><td>'+esc(v.status)+'</td><td>'+esc(msg)+'</td></tr>';
+ });
+ return head('ADMIN & AUDIT','Kesiapan Integrasi','Konfigurasi nonrahasia. Pemeriksaan ini tidak menghubungi penyedia dan tidak menjamin akses data pemerintah.')+
+ '<section class="card"><div class="notice warn">'+esc(ready.notice||'Integrasi eksternal belum divalidasi.')+
+ '</div>'+table(['Layanan','Status','Catatan'],rows)+
+ '<p class="field-note">Integrasi resmi harus melewati perjanjian mitra, perizinan data, pemeriksaan keamanan, dan UAT sebelum digunakan untuk keputusan agunan.</p></section>';
+}
 const table=(cols,rows)=>`<div class="tablewrap"><table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 const assetRow=x=>`<tr><td class="strong"><button type="button" class="linkbtn" data-open="${esc(x.id)}">${esc(x.reference_no)}</button></td><td><strong>${esc(x.borrower)}</strong><div class="muted small">${esc(x.asset_type)}</div></td><td class="wrap">${esc(x.address||'—')}</td><td>${money(x.market_value)}</td><td>${badge(x.status)}</td><td>${formatDate(x.updated_at)}</td></tr>`;
 function dashboard(){const s=state.dashboard||{assets:{total:0,approved_market:0,approved_liquidation:0},statuses:[],recent:[]};const statuses=Object.fromEntries(s.statuses.map(x=>[x.status,x.total]));const pending=['SUBMITTED','REVIEWED','RECOMMENDED'].reduce((n,x)=>n+(statuses[x]||0),0);
