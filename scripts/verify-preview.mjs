@@ -33,6 +33,7 @@ await check('Static homepage','/',200,async r=>{
   return html.includes('app.js') && html.includes('styles.css') && html.includes('id="app"');
 });
 await check('Frontend JavaScript','/app.js',200,async r=>r.headers.get('content-type')?.includes('javascript'));
+await check('API client module','/api-client.js',200,async r=>r.headers.get('content-type')?.includes('javascript'));
 await check('Frontend stylesheet','/styles.css',200,async r=>r.headers.get('content-type')?.includes('css'));
 await check('PostgreSQL health','/api/health',200,async r=>{
   if(!r.headers.get('cache-control')?.includes('no-store'))return false;

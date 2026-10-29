@@ -1,12 +1,13 @@
 /** Single Vercel Node.js function for all /api/* routes. */
 import {handleCollManApi} from '../src/vercel-api.js';
 import {getPostgres} from '../src/postgres.js';
+import {serviceError} from '../src/service-errors.js';
 
-function json(res,status,message) {
+function json(res,status,message,code) {
   res.statusCode=status;
   res.setHeader('content-type','application/json; charset=utf-8');
   res.setHeader('cache-control','no-store');
-  res.end(JSON.stringify({error:message}));
+  res.end(JSON.stringify({error:message,...(code?{code}:{})}));
 }
 
 export default async function handler(req,res) {
@@ -47,9 +48,8 @@ export default async function handler(req,res) {
     res.setHeader('x-content-type-options','nosniff');
     res.end(Buffer.from(await result.arrayBuffer()));
   }catch(error) {
-    const status=Number.isInteger(error.status)?error.status:
-      error.message==='DATABASE_URL is missing'||error.message.includes('Production database must configure TLS')?503:500;
-    if(status===500) console.error('CollMan Vercel API error:',error.code||error.message);
-    json(res,status,status===503?'Database belum dikonfigurasi.':status===500?'Terjadi gangguan sistem. Hubungi administrator.':error.message);
+    const failure=serviceError(error);
+    if(failure.status===500) console.error('CollMan Vercel API error:',error.code||'unknown');
+    json(res,failure.status,failure.message,failure.code);
   }
 }
