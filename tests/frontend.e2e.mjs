@@ -35,7 +35,8 @@ test('CollMan desktop and mobile browser: login, dashboard, register, navigation
     await page.locator('[data-nav="dashboard"]').click();
     assert.match(await page.locator('.pagehead h1').innerText(),/Dashboard/i);
     const overflows=await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+2);
-    assert.equal(overflows,false,'Mobile layout should not scroll horizontally');
+    const offenders=await page.evaluate(()=>[...document.querySelectorAll('*')].filter(el=>el.getBoundingClientRect().right>innerWidth+2).slice(0,15).map(el=>({tag:el.tagName,cls:el.className,scroll:el.scrollWidth,left:Math.round(el.getBoundingClientRect().left),right:Math.round(el.getBoundingClientRect().right)})));
+    assert.equal(overflows,false,'Mobile layout should not scroll horizontally: '+JSON.stringify(offenders));
     await page.close();
   }finally{
     await browser.close();await new Promise(resolve=>web.close(resolve));
