@@ -258,8 +258,11 @@ async function api(request,env,db){
     guard(actor.role==='ADMIN','Hanya Admin dapat mengubah parameter.');
     const body=await readBody(request),raw=body.risk_weights||{},weights={};
     for(const f of RISK_FLAGS)weights[f]=numberIn(raw[f]??0,0,100,`Bobot ${f}`);
-    await run(db,'UPDATE tenant_settings SET risk_weights_json=?,updated_at=datetime(\'now\') WHERE tenant_id=?',JSON.stringify(weights),actor.tenant_id);
-    await audit(db,actor,'SETTINGS',actor.tenant_id,'UPDATE_RISK_WEIGHTS',{weights});return response({ok:true,risk_weights:weights});
+    await db.transaction(async tx=>{
+      await run(tx,"UPDATE tenant_settings SET risk_weights_json=?,updated_at=datetime('now') WHERE tenant_id=?",JSON.stringify(weights),actor.tenant_id);
+      await audit(tx,actor,'SETTINGS',actor.tenant_id,'UPDATE_RISK_WEIGHTS',{weights});
+    });
+    return response({ok:true,risk_weights:weights});
   }
   if(path==='/api/users'&&request.method==='GET'){
     guard(actor.role==='ADMIN','Hanya Admin dapat melihat pengguna.');
@@ -270,9 +273,16 @@ async function api(request,env,db){
     const body=await readBody(request),email=validEmail(body.email),name=required(body.display_name,'Nama pengguna',150),role=required(body.role,'Peran',50),password=strongPassword(body.password);
     guard(ROLES.includes(role),'Peran tidak dikenal.');
     const salt=bytesToHex(crypto.getRandomValues(new Uint8Array(16))),id=uuid();
-    try{await run(db,'INSERT INTO users (id,tenant_id,email,display_name,role,password_hash,password_salt) VALUES (?,?,?,?,?,?,?)',id,actor.tenant_id,email,name,role,await hashPassword(password,salt),salt);}
-    catch{throw problem('Gagal membuat pengguna. Pastikan email belum digunakan.',409);}
-    await audit(db,actor,'USER',id,'CREATE',{email,role});return response({id},201);
+    try{
+      await db.transaction(async tx=>{
+        await run(tx,'INSERT INTO users (id,tenant_id,email,display_name,role,password_hash,password_salt) VALUES (?,?,?,?,?,?,?)',id,actor.tenant_id,email,name,role,await hashPassword(password,salt),salt);
+        await audit(tx,actor,'USER',id,'CREATE',{email,role});
+      });
+    }catch(error){
+      if(error.code==='23505')throw problem('Email pengguna sudah digunakan.',409);
+      throw error;
+    }
+    return response({id},201);
   }
   const userRoute=path.match(/^\/api\/users\/([^/]+)$/);
   if(userRoute&&request.method==='PUT'){
@@ -280,10 +290,13 @@ async function api(request,env,db){
     const id=userRoute[1],data=await readBody(request),role=required(data.role,'Peran',50);guard(ROLES.includes(role),'Peran tidak dikenal.');
     const active=data.active===true?1:0;
     guard(id!==actor.id || role==='ADMIN'&&active===1,'Admin tidak dapat menonaktifkan atau mengubah perannya sendiri.');
-    const update=await run(db,'UPDATE users SET role=?,active=? WHERE id=? AND tenant_id=?',role,active,id,actor.tenant_id);
-    guard(update.meta.changes>0,'Pengguna tidak ditemukan.',404);
-    if(!active)await run(db,'DELETE FROM sessions WHERE user_id=?',id);
-    await audit(db,actor,'USER',id,'UPDATE',{role,active});return response({ok:true});
+    await db.transaction(async tx=>{
+      const update=await run(tx,'UPDATE users SET role=?,active=? WHERE id=? AND tenant_id=?',role,active,id,actor.tenant_id);
+      guard(update.meta.changes>0,'Pengguna tidak ditemukan.',404);
+      if(!active)await run(tx,'DELETE FROM sessions WHERE user_id=?',id);
+      await audit(tx,actor,'USER',id,'UPDATE',{role,active});
+    });
+    return response({ok:true});
   }
   if(path==='/api/audit'&&request.method==='GET'){
     guard(['ADMIN','AUDITOR'].includes(actor.role),'Hanya Admin dan Auditor dapat melihat audit trail.');
