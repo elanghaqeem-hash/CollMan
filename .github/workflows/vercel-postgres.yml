@@ -48,6 +48,8 @@ jobs:
           DATABASE_URL: ""
       - name: Apply isolated PostgreSQL schema
         run: npm run db:migrate
+      - name: Verify schema checksums, tenant constraints and cross-tenant integrity
+        run: npm run db:verify
       - name: API integration (RBAC, segregation of duties, approvals, audit, tenant)
         run: npm run test:integration
       - name: Standalone Node HTTP handler smoke test
@@ -60,3 +62,5 @@ jobs:
         run: node --test tests/frontend.e2e.mjs
       - name: Confirm migration is idempotent
         run: npm run db:migrate
+      - name: Re-verify database is safe after integration tests
+        run: npm run db:verify
