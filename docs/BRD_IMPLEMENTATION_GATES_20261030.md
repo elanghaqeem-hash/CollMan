@@ -21,7 +21,7 @@
 | F11 Data migration | Excel bulk upload incl. document metadata | Not implemented | Template validation, duplicate detection, error batches, rollback, sample tests |
 | F12 Operations | Activity log, retention, backup and disaster recovery | Basic audit table | Tamper-evident logs, retention, immutable evidence, per-tenant isolation, backups and restore drills |
 | F13 Collateral coverage | All eligible banking asset categories | Current register is mostly real-property-focused | Movable assets, inventory, vehicles, equipment, receivables, deposits, securities, guarantees, other bank-approved categories |
-| F14 Storage | Requested PostgreSQL path / operational persistence | Runtime examined: Cloudflare SQLite-backed Durable Object | Formal PostgreSQL architecture and controlled migration path; current data must not be destroyed or silently replatformed |
+| F14 Storage | Requested PostgreSQL path / operational persistence | Both Cloudflare SQLite-backed Durable Object and Vercel/PostgreSQL source paths exist | Identify actual live host/DB, confirm migration parity and data ownership; no silent replatforming |
 
 ## External connector acceptance gates
 
