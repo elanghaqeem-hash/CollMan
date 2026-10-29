@@ -11,9 +11,14 @@ async function call(method,path,body,cookie,origin=BASE) {
   if(origin!==null) headers.origin=origin;
   if(cookie) headers.cookie=cookie;
   const request=new Request(BASE+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
-  const response=await handleCollManApi(request,env,getPostgres());
-  const data=await response.json();
-  return {status:response.status,data,cookie:response.headers.get('set-cookie')?.split(';')[0]};
+  try {
+    const response=await handleCollManApi(request,env,getPostgres());
+    const data=await response.json();
+    return {status:response.status,data,cookie:response.headers.get('set-cookie')?.split(';')[0]};
+  } catch(error) {
+    if(!Number.isInteger(error.status)) throw error;
+    return {status:error.status,data:{error:error.message}};
+  }
 }
 async function login(email,password) {
   const r=await call('POST','/api/auth/login',{email,password});
