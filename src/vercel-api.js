@@ -128,14 +128,16 @@ async function api(request,env,db){
   guard(actor,'Sesi tidak valid atau kedaluwarsa.',401);
   if(path==='/api/auth/password' && request.method==='POST'){
     const body=await readBody(request),password=strongPassword(body.new_password);
-    const u=await row(db,'SELECT password_hash,password_salt FROM users WHERE id=?',actor.id);
-    guard(constantEquals(await hashPassword(String(body.old_password??''),u.password_salt),u.password_hash),'Password lama salah.',403);
-    const salt=bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
-    await db.batch([
-      db.prepare('UPDATE users SET password_hash=?,password_salt=? WHERE id=?').bind(await hashPassword(password,salt),salt,actor.id),
-      db.prepare('DELETE FROM sessions WHERE user_id=?').bind(actor.id)
-    ]);
-    await audit(db,actor,'USER',actor.id,'CHANGE_PASSWORD');return response({ok:true,relogin:true},200,{'set-cookie':sessionCookie('',request,true)});
+    await db.transaction(async tx=>{
+      const u=await row(tx,'SELECT password_hash,password_salt FROM users WHERE id=? FOR UPDATE',actor.id);
+      guard(u,'Pengguna tidak ditemukan.',404);
+      guard(constantEquals(await hashPassword(String(body.old_password??''),u.password_salt),u.password_hash),'Password lama salah.',403);
+      const salt=bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
+      await run(tx,'UPDATE users SET password_hash=?,password_salt=? WHERE id=?',await hashPassword(password,salt),salt,actor.id);
+      await run(tx,'DELETE FROM sessions WHERE user_id=?',actor.id);
+      await audit(tx,actor,'USER',actor.id,'CHANGE_PASSWORD');
+    });
+    return response({ok:true,relogin:true},200,{'set-cookie':sessionCookie('',request,true)});
   }
   if(path==='/api/dashboard'&&request.method==='GET'){
     const stats=await all(db,`SELECT status,COUNT(*) AS total FROM assets WHERE tenant_id=? GROUP BY status`,actor.tenant_id);
