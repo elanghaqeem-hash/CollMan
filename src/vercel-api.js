@@ -211,15 +211,25 @@ async function api(request,env,db){
       if(source){let parsed;try{parsed=new URL(source);}catch{throw problem('URL pembanding tidak valid.');}guard(parsed.protocol==='https:'||parsed.protocol==='http:','URL pembanding harus HTTP(S).');}
       const price=numberIn(data.offering_price,1,9e15,'Harga penawaran');guard(Number.isSafeInteger(price),'Harga pembanding harus bilangan bulat.');
       const land=numberIn(data.land_area??0,0,1e9,'Luas tanah'),building=numberIn(data.building_area??0,0,1e9,'Luas bangunan');
-      const cid=uuid();await run(db,`INSERT INTO comparables (id,tenant_id,asset_id,description,address,source_url,offering_price,land_area,building_area,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)`,cid,actor.tenant_id,id,description,address,source,price,land,building,actor.id);
-      await audit(db,actor,'COMPARABLE',cid,'CREATE',{asset_id:id});return response({id:cid},201);
+      const cid=uuid();
+      await db.transaction(async tx=>{
+        await lockEditableAsset(tx,actor,id);
+        await run(tx,`INSERT INTO comparables (id,tenant_id,asset_id,description,address,source_url,offering_price,land_area,building_area,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+          cid,actor.tenant_id,id,description,address,source,price,land,building,actor.id);
+        await audit(tx,actor,'COMPARABLE',cid,'CREATE',{asset_id:id});
+      });
+      return response({id:cid},201);
     }
     const cm=sub.match(/^comparables\/([^/]+)$/);
     if(cm&&request.method==='DELETE'){
       guard(canEditAsset(actor,asset),'Tidak memiliki hak menghapus pembanding.');
-      const result=await run(db,'DELETE FROM comparables WHERE id=? AND tenant_id=? AND asset_id=?',cm[1],actor.tenant_id,id);
-      guard(result.meta.changes>0,'Pembanding tidak ditemukan.',404);
-      await audit(db,actor,'COMPARABLE',cm[1],'DELETE',{asset_id:id});return response({ok:true});
+      await db.transaction(async tx=>{
+        await lockEditableAsset(tx,actor,id);
+        const result=await run(tx,'DELETE FROM comparables WHERE id=? AND tenant_id=? AND asset_id=?',cm[1],actor.tenant_id,id);
+        guard(result.meta.changes>0,'Pembanding tidak ditemukan.',404);
+        await audit(tx,actor,'COMPARABLE',cm[1],'DELETE',{asset_id:id});
+      });
+      return response({ok:true});
     }
     if(sub==='transition'&&request.method==='POST'){
       const data=await readBody(request),action=required(data.action,'Aksi workflow',50),note=safeNote(data.note);
