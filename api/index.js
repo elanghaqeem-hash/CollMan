@@ -13,7 +13,8 @@ export default async function handler(req,res) {
   try {
     const hostname=req.headers.host;
     if(!hostname || /[\\\s/]/.test(hostname)) return json(res,400,'Invalid host');
-    const url=new URL(req.url||'/api/index','https://'+hostname);
+    const scheme=process.env.VERCEL==='1'||req.socket?.encrypted?'https':'http';
+    const url=new URL(req.url||'/api/index',scheme+'://'+hostname);
     // Rewrites retain query parameters; this explicit route parameter works on both Vercel and local tests.
     const route=url.searchParams.get('_collman_path');
     if(route !== null) {
