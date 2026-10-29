@@ -52,5 +52,11 @@ jobs:
         run: npm run test:integration
       - name: Standalone Node HTTP handler smoke test
         run: node --test tests/vercel-handler.integration.test.mjs
+      - name: Install headless Chromium for frontend UAT
+        run: |
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Browser E2E: desktop, mobile, login and menu navigation
+        run: node --test tests/frontend.e2e.mjs
       - name: Confirm migration is idempotent
         run: npm run db:migrate
