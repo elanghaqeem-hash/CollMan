@@ -1,4 +1,5 @@
 import {escapeText, currency, riskLabels, statusText, actionText} from './helpers.js';
+import {requestApi as api,validateMetadata} from './api-client.js';
 const app=document.getElementById('app');
 const state={user:null,needSetup:false,configError:'',view:'dashboard',dashboard:null,list:null,detail:null,settings:null,users:null,audit:null,search:'',status:'',edit:false,mobile:false,busy:false};
 const esc=escapeText;
@@ -8,20 +9,12 @@ const badge=s=>`<span class="pill ${esc(s)}">${esc(statusText[s]||s)}</span>`;
 const formatDate=x=>x?new Date(x.replace(' ','T')+'Z').toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}):'—';
 const empty=(title,subtitle)=>`<div class="empty"><span class="icon">▤</span><strong>${esc(title)}</strong><div>${esc(subtitle)}</div></div>`;
 function notify(message,bad=false){document.querySelector('.toast')?.remove();const t=document.createElement('div');t.className=`toast ${bad?'bad':''}`;t.textContent=message;document.body.appendChild(t);setTimeout(()=>t.remove(),4200);}
-async function api(path,options={}){
-  const config={credentials:'same-origin',...options};
-  if(config.body&&typeof config.body!=='string')config.body=JSON.stringify(config.body);
-  if(config.body)config.headers={'content-type':'application/json',...config.headers};
-  let res;try{res=await fetch(path,config);}catch{throw new Error('Tidak dapat menghubungi server. Periksa jaringan.');}
-  let json;try{json=await res.json();}catch{throw new Error('Respons server tidak valid.');}
-  if(!res.ok)throw new Error(json.error||`HTTP ${res.status}`);return json;
-}
-async function init(){try{const meta=await api('/api/meta');state.needSetup=meta.needs_setup;state.user=meta.user;state.configError='';if(state.user)await loadView();else renderAuth();}catch(e){state.configError=e.message;renderAuth();}}
+async function init(){try{const meta=validateMetadata(await api('/api/meta'));state.needSetup=meta.needs_setup;state.user=meta.user;state.configError='';if(state.user)await loadView();else renderAuth();}catch(e){state.user=null;state.needSetup=false;state.configError=e.message;renderAuth();}}
 function renderAuth(){
  const setup=state.needSetup&&!state.configError;
  app.innerHTML=`<div class="auth-screen"><div class="auth-hero"><div class="brand"><span class="brand-mark">C</span><span><strong>CollMan</strong><small>COLLATERAL MANAGEMENT</small></span></div><h1>Kelola agunan dengan keyakinan.</h1><p>Satu platform untuk pencatatan agunan, verifikasi legalitas, penilaian, review berjenjang, dan audit trail yang terstruktur.</p><div class="footer">Collateral intelligence. Controlled decisions. &copy; 2026 CollMan.</div></div>
- <div class="auth-right"><div class="auth-card"><div class="eyebrow">${setup?'SETUP ORGANISASI':'PORTAL PENGGUNA'}</div><h2>${setup?'Aktivasi administrator':'Selamat datang'}</h2><p>${setup?'Masukkan token setup yang disimpan secara aman di Cloudflare Secret untuk membuat administrator pertama.':'Login menggunakan akun yang dibuat administrator institusi Anda.'}</p>
- ${state.configError?`<div class="bad-config"><strong>Konfigurasi belum selesai.</strong><p>${esc(state.configError)}</p><small>Administrator perlu memastikan koneksi PostgreSQL dan migrasi database telah disiapkan.</small></div>`:''}
+ <div class="auth-right"><div class="auth-card"><div class="eyebrow">${setup?'SETUP ORGANISASI':'PORTAL PENGGUNA'}</div><h2>${setup?'Aktivasi administrator':'Selamat datang'}</h2><p>${setup?'Masukkan token aktivasi dari administrator sistem untuk membuat administrator pertama.':'Login menggunakan akun yang dibuat administrator institusi Anda.'}</p>
+ ${state.configError?`<div class="bad-config" role="alert"><strong>Layanan login belum siap.</strong><p>${esc(state.configError)}</p><button type="button" class="btn" data-action="retry-connection">Coba lagi</button></div>`:''}
  ${!state.configError?`<form id="auth-form">
  ${setup?`<div class="form-group"><label>Nama institusi</label><input class="field" name="organization" required maxlength="150" placeholder="Nama bank / institusi"></div><div class="form-group"><label>Nama administrator</label><input class="field" name="display_name" required maxlength="150"></div>`:''}
  <div class="form-group"><label>Email</label><input type="email" class="field" name="email" autocomplete="username" required></div>
@@ -134,6 +127,7 @@ async function onClick(event){const nav=event.target.closest('[data-nav]');if(na
  const open=event.target.closest('[data-open]');if(open){state.detail={asset:{id:open.dataset.open}};await navigate('asset');return;}
  const action=event.target.closest('[data-action]')?.dataset.action;
  if(action){
+  if(action==='retry-connection'){const button=event.target.closest('button');if(button)button.disabled=true;await init();return;}
   if(action==='sidebar-toggle'||action==='sidebar-close'){state.mobile=action==='sidebar-toggle'?!state.mobile:false;renderShell();return;}
   if(action==='password'){state.view='password';renderShell();return;}
   if(action==='logout'){try{await api('/api/auth/logout',{method:'POST',body:{}});}catch{}state.user=null;state.view='dashboard';await init();return;}

@@ -6,12 +6,46 @@ import {chromium} from 'playwright';
 import handler from '../api/index.js';
 
 const MIME={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8'};
+test('Login readiness on desktop/mobile: missing API, missing DB, retry recovery',async()=>{
+  const web=createServer(async(req,res)=>{
+    const file=req.url==='/'?'index.html':req.url.slice(1);
+    if(!['index.html','app.js','helpers.js','api-client.js','styles.css'].includes(file)){res.writeHead(404).end();return;}
+    const body=await readFile(new URL('../public/'+file,import.meta.url));
+    res.writeHead(200,{'content-type':MIME[file.slice(file.lastIndexOf('.'))]});res.end(body);
+  });
+  await new Promise(resolve=>web.listen(0,'127.0.0.1',resolve));
+  let browser;
+  try{
+    browser=await chromium.launch({headless:true});
+    for(const viewport of [{width:1440,height:900},{width:390,height:844}]){
+      const page=await browser.newPage({viewport});
+      let phase=0;
+      await page.route('**/api/meta',route=>route.fulfill(phase===0?
+        {status:404,contentType:'text/plain',body:'NOT_FOUND'}:phase===1?
+        {status:503,contentType:'application/json',body:JSON.stringify({error:'Database belum terhubung.',code:'DATABASE_NOT_CONFIGURED'})}:
+        {status:200,contentType:'application/json',body:JSON.stringify({product:'CollMan',needs_setup:false,user:null,roles:['ADMIN']})}));
+      await page.goto('http://127.0.0.1:'+web.address().port);
+      await page.getByRole('alert').waitFor();
+      assert.match(await page.getByRole('alert').innerText(),/belum terpasang/);
+      assert.equal(await page.locator('#auth-form').count(),0);
+      assert.doesNotMatch(await page.locator('body').innerText(),/D1|Cloudflare Secret/);
+      phase=1;await page.getByRole('button',{name:'Coba lagi'}).click();
+      await page.getByText('Database belum terhubung.',{exact:true}).waitFor();
+      assert.equal(await page.locator('#auth-form').count(),0);
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2),false);
+      phase=2;await page.getByRole('button',{name:'Coba lagi'}).click();
+      await page.locator('#auth-form').waitFor();
+      assert.equal(await page.getByRole('alert').count(),0);
+      await page.close();
+    }
+  }finally{await browser?.close();await new Promise(resolve=>web.close(resolve));}
+});
 test('CollMan desktop and mobile browser: login, dashboard, register, navigation', {skip:!process.env.DATABASE_URL}, async()=>{
   const web=createServer(async (req,res)=>{
     const url=new URL(req.url,'http://localhost');
     if(url.pathname.startsWith('/api/')) return handler(req,res);
     let file=url.pathname==='/'?'index.html':url.pathname.slice(1);
-    if(!['index.html','app.js','helpers.js','styles.css'].includes(file)){res.writeHead(404).end();return;}
+    if(!['index.html','app.js','helpers.js','api-client.js','styles.css'].includes(file)){res.writeHead(404).end();return;}
     const body=await readFile(new URL('../public/'+file,import.meta.url));
     res.writeHead(200,{'content-type':MIME[file.slice(file.lastIndexOf('.'))]||'application/octet-stream'});
     res.end(body);
