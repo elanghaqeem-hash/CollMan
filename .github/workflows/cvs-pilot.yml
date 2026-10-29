@@ -1,0 +1,25 @@
+name: CVS pilot security and BRB regression
+on:
+  push:
+    paths:
+      - "deploy/cloudflare/**"
+      - "tests/test_cloudflare_worker.mjs"
+      - ".github/workflows/cvs-pilot.yml"
+  pull_request:
+    paths:
+      - "deploy/cloudflare/**"
+      - "tests/test_cloudflare_worker.mjs"
+jobs:
+  restricted-pilot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax check
+        run: node --check deploy/cloudflare/worker.mjs
+      - name: Calculation and fail-closed smoke tests
+        run: node tests/test_cloudflare_worker.mjs

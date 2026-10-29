@@ -21,11 +21,11 @@ async function allowed(req){
     const h=JSON.parse(new TextDecoder().decode(decode64(p[0])));
     const c=JSON.parse(new TextDecoder().decode(decode64(p[1])));
     const now=Math.floor(Date.now()/1000);
-    if(h.alg!=="RS256"||!h.kid||c.iss!==ISS||String(c.email).toLowerCase()!==ADMIN||c.exp<=now||c.iat>now+60)return false;
+    if(h.alg!=="RS256"||!h.kid||c.iss!==ISS||String(c.email).toLowerCase()!==ADMIN||!Number.isInteger(c.exp)||c.exp<=now||!Number.isInteger(c.iat)||c.iat>now+60)return false;
     if(!(Array.isArray(c.aud)?c.aud.includes(AUD):c.aud===AUD))return false;
     const res=await fetch(ISS+"/cdn-cgi/access/certs");
     if(!res.ok)return false;
-    const {keys}=await res.json();const jwk=keys.find(k=>k.kid===h.kid&&k.kty==="RSA");
+    const {keys}=await res.json();if(!Array.isArray(keys))return false;const jwk=keys.find(k=>k.kid===h.kid&&k.kty==="RSA");
     if(!jwk)return false;
     const key=await crypto.subtle.importKey("jwk",jwk,{name:"RSASSA-PKCS1-v1_5",hash:"SHA-256"},false,["verify"]);
     return crypto.subtle.verify("RSASSA-PKCS1-v1_5",key,decode64(p[2]),new TextEncoder().encode(p[0]+"."+p[1]));
@@ -94,3 +94,5 @@ export default {async fetch(req){
  }
  return json({error:"Not found"},404);
 }};
+
+export {calculate};

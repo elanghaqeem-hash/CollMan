@@ -31,3 +31,12 @@ Business requirements and appraisal workbooks are available as project reference
 ## Notes on synchronization
 
 Repository updates from development work performed through ChatGPT require an explicit GitHub write operation for each change set. This README establishes the working convention; it does **not** install an always-running synchronizer for edits made outside this workflow.
+
+
+## Restricted pilot deployment (2026-10-29)
+
+Cloudflare Worker `collman` has been deployed to `https://collman.elang-haqeem.workers.dev`, protected by a Cloudflare Access administrator-only policy and verified Access JWT. The deployed code is in `deploy/cloudflare/worker.mjs`.
+
+**This pilot is NOT the operational bank application.** It performs sample BRB/NP calculations only, does not persist any data, and must not receive real customer or collateral information. The earlier full Python foundation package and migrations are not yet synchronized into this GitHub repository. They remain in the delivery artifact. Release is explicitly blocked pending backend data persistence, bank RBAC/ABAC and SoD, legal/GIS validation, approved master data, PII protection, complete reporting, and production UAT.
+
+ASUMSI: The restricted adapter and associated access policy exist solely for technical verification.
