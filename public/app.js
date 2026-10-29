@@ -21,12 +21,12 @@ function renderAuth(){
  const setup=state.needSetup&&!state.configError;
  app.innerHTML=`<div class="auth-screen"><div class="auth-hero"><div class="brand"><span class="brand-mark">C</span><span><strong>CollMan</strong><small>COLLATERAL MANAGEMENT</small></span></div><h1>Kelola agunan dengan keyakinan.</h1><p>Satu platform untuk pencatatan agunan, verifikasi legalitas, penilaian, review berjenjang, dan audit trail yang terstruktur.</p><div class="footer">Collateral intelligence. Controlled decisions. &copy; 2026 CollMan.</div></div>
  <div class="auth-right"><div class="auth-card"><div class="eyebrow">${setup?'SETUP ORGANISASI':'PORTAL PENGGUNA'}</div><h2>${setup?'Aktivasi administrator':'Selamat datang'}</h2><p>${setup?'Masukkan token setup yang disimpan secara aman di Cloudflare Secret untuk membuat administrator pertama.':'Login menggunakan akun yang dibuat administrator institusi Anda.'}</p>
- ${state.configError?`<div class="bad-config"><strong>Konfigurasi belum selesai.</strong><p>${esc(state.configError)}</p><small>Admin perlu memastikan D1 binding dan migrasi database telah disiapkan.</small></div>`:''}
+ ${state.configError?`<div class="bad-config"><strong>Konfigurasi belum selesai.</strong><p>${esc(state.configError)}</p><small>Administrator perlu memastikan koneksi PostgreSQL dan migrasi database telah disiapkan.</small></div>`:''}
  ${!state.configError?`<form id="auth-form">
  ${setup?`<div class="form-group"><label>Nama institusi</label><input class="field" name="organization" required maxlength="150" placeholder="Nama bank / institusi"></div><div class="form-group"><label>Nama administrator</label><input class="field" name="display_name" required maxlength="150"></div>`:''}
  <div class="form-group"><label>Email</label><input type="email" class="field" name="email" autocomplete="username" required></div>
  <div class="form-group"><label>Password ${setup?'baru':'akun'}</label><input type="password" class="field" name="password" required autocomplete="${setup?'new-password':'current-password'}" minlength="${setup?'12':'1'}"></div>
- ${setup?`<div class="form-group"><label>Token setup Cloudflare</label><input class="field" type="password" name="setup_token" required autocomplete="off"></div>`:''}
+ ${setup?`<div class="form-group"><label>Token aktivasi administrator</label><input class="field" type="password" name="setup_token" required autocomplete="off"></div>`:''}
  <button type="submit" class="btn primary">${setup?'Aktivasi Administrator':'Masuk ke CollMan'}</button></form>`:''}
  <div class="auth-powered">Akses terbatas • Sesi 12 jam • Segregation of duties</div></div></div></div>`;
 }
