@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import pg from 'pg';
+import {randomUUID} from 'node:crypto';
 import {handleCollManApi} from '../src/vercel-api.js';
 import {getPostgres} from '../src/postgres.js';
 
@@ -126,6 +128,49 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
     db.prepare('UPDATE assets SET status=? WHERE id=?').bind('UNRECOGNIZED',id).run(),
     {code:'23514'}
   );
+
+  // Concurrency UAT: an editor must not persist stale data once a workflow
+  // transition commits while the editor is waiting for a row lock.
+  const raceCreated=await call('POST','/api/assets',{...assetInfo,borrower:'Concurrent Maker'},maker);
+  assert.equal(raceCreated.status,201);
+  const raceId=raceCreated.data.id;
+  const raceVal=await call('PUT','/api/assets/'+raceId+'/appraisal',
+    {market_value:100000000,base_haircut_pct:10},maker);
+  assert.equal(raceVal.status,200);
+  const independentPool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:1});
+  const locked=await independentPool.connect();
+  try {
+    await locked.query('BEGIN');
+    await locked.query('SELECT id FROM assets WHERE id=$1 FOR UPDATE',[raceId]);
+    const staleEdit=call('PUT','/api/assets/'+raceId,
+      {...assetInfo,borrower:'Stale writer must not persist'},maker);
+    let observedLock=false;
+    for(let attempt=0;attempt<80;attempt++){
+      const wait=await locked.query(`SELECT count(*)::int AS waiting FROM pg_stat_activity
+        WHERE datname=current_database() AND wait_event_type='Lock' AND pid<>pg_backend_pid()`);
+      if(wait.rows[0].waiting>0){observedLock=true;break;}
+      await new Promise(resolve=>setTimeout(resolve,15));
+    }
+    assert.ok(observedLock,'Expected concurrent editor to wait for the collateral row lock');
+    await locked.query("UPDATE assets SET status='SUBMITTED' WHERE id=$1",[raceId]);
+    await locked.query(`INSERT INTO workflow_history
+      (id,tenant_id,asset_id,action,from_status,to_status,actor_user_id)
+      VALUES ($1,$2,$3,'SUBMIT','DRAFT','SUBMITTED',$4)`,
+      [randomUUID(),owner.tenant_id,raceId,userIds.MAKER]);
+    await locked.query(`INSERT INTO audit_log
+      (id,tenant_id,entity_type,entity_id,action,actor_user_id)
+      VALUES ($1,$2,'ASSET',$3,'SUBMIT',$4)`,
+      [randomUUID(),owner.tenant_id,raceId,userIds.MAKER]);
+    await locked.query('COMMIT');
+    const denied=await staleEdit;
+    assert.equal(denied.status,409,JSON.stringify(denied.data));
+    const preserved=await db.prepare('SELECT borrower,status FROM assets WHERE id=?').bind(raceId).first();
+    assert.equal(preserved.borrower,'Concurrent Maker');
+    assert.equal(preserved.status,'SUBMITTED');
+  }finally{
+    try{await locked.query('ROLLBACK');}catch{}
+    locked.release();await independentPool.end();
+  }
 
   await db.prepare('INSERT INTO tenants(id,name) VALUES (?,?)').bind('test-tenant-2','UAT B').run();
   await db.prepare('INSERT INTO users(id,tenant_id,email,display_name,role,password_hash,password_salt) VALUES (?,?,?,?,?,?,?)')
