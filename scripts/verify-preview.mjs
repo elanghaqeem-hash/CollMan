@@ -18,8 +18,11 @@ async function get(path) {
   if(process.env.VERCEL_AUTOMATION_BYPASS_SECRET)
     headers['x-vercel-protection-bypass']=process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
   const res=await fetch(url,{headers,signal:AbortSignal.timeout(12000),redirect:'error',cache:'no-store'});
-  if([401,403].includes(res.status) && /vercel/i.test(res.headers.get('server')||''))
-    throw new Error('Vercel Deployment Protection denied the probe; configure an approved bypass secret');
+  // Vercel also sets Server: Vercel on *application* 401 responses.
+  // A JSON 401 with Cache-Control: no-store is the expected RBAC denial.
+  // Deployment Protection typically responds with an HTML authentication page.
+  if([401,403].includes(res.status) && !(res.headers.get('content-type')||'').includes('application/json'))
+    throw new Error('The target refused access before the CollMan API returned JSON. Check Vercel Deployment Protection.');
   return res;
 }
 async function check(name,path,status,verify=()=>true) {
