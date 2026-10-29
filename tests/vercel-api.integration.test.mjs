@@ -111,6 +111,18 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
     .bind('test-asset-other','test-tenant-2','CM-UAT-OTHER','Outside tenant','Ruko','Other address','test-other-maker').run();
   assert.equal((await call('GET','/api/assets/test-asset-other',undefined,maker)).status,404);
   assert.ok(!(await call('GET','/api/assets',undefined,maker)).data.records.some(x=>x.id==='test-asset-other'));
+  // Even if an application bug omits the tenant filter, foreign keys reject cross-tenant links.
+  const owner=await db.prepare('SELECT tenant_id FROM users WHERE id=?').bind(userIds.MAKER).first();
+  await assert.rejects(
+    db.prepare('INSERT INTO comparables (id,tenant_id,asset_id,description,offering_price,created_by) VALUES (?,?,?,?,?,?)')
+      .bind('cross-tenant-comp',''+owner.tenant_id,'test-asset-other','Forbidden tenant link',500000,userIds.MAKER).run(),
+    {code:'23503'}
+  );
+  await assert.rejects(
+    db.prepare('INSERT INTO audit_log (id,tenant_id,entity_type,entity_id,action,actor_user_id) VALUES (?,?,?,?,?,?)')
+      .bind('cross-tenant-audit','test-tenant-2','ASSET',id,'CROSS_TENANT',userIds.MAKER).run(),
+    {code:'23503'}
+  );
   assert.equal((await call('POST','/api/assets/'+id+'/transition',{action:'RETURN',note:'reason'},checker)).status,403);
   const changed=await call('POST','/api/auth/password',{old_password:password,new_password:'NewPassword123!'},maker);
   assert.equal(changed.status,200);
