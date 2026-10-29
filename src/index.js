@@ -1,5 +1,6 @@
 import {DurableObject} from 'cloudflare:workers';
 import {INITIAL_SCHEMA} from './schema.js';
+import {integrationReadiness,analyzeComparableOffers,screenSpatialEvidence,normalizeOcrReview} from './integrations.js';
 import {ROLES, RISK_FLAGS, STATUS_LABELS, ACTIONS, validateAsset, calculateValuation, nextWorkflow, numberIn, required, optional, problem} from './domain.js';
 
 const COOKIE = 'collman_session';
@@ -127,6 +128,10 @@ async function api(request,env,db){
     ]);
     await audit(db,actor,'USER',actor.id,'CHANGE_PASSWORD');return response({ok:true,relogin:true},200,{'set-cookie':sessionCookie('',request,true)});
   }
+  if(path==='/api/integrations'&&request.method==='GET'){
+    guard(['ADMIN','AUDITOR'].includes(actor.role),'Hanya Admin dan Auditor dapat melihat status integrasi.');
+    return response({connectors:integrationReadiness(env),notice:'Status konfigurasi bukan bukti koneksi. ATR/BPN, OCR, AI dan GIS memerlukan kontrak provider, persetujuan pemrosesan data dan UAT langsung.'});
+  }
   if(path==='/api/dashboard'&&request.method==='GET'){
     const stats=await all(db,`SELECT status,COUNT(*) AS total FROM assets WHERE tenant_id=? GROUP BY status`,actor.tenant_id);
     const assets=await row(db,`SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN a.status='APPROVED' THEN p.market_value ELSE 0 END),0) AS approved_market,
@@ -170,6 +175,22 @@ async function api(request,env,db){
       await run(db,`UPDATE assets SET borrower=?,asset_type=?,address=?,certificate_type=?,certificate_no=?,nib=?,ownership_name=?,land_area=?,building_area=?,legal_status=?,notes=?,updated_at=datetime('now')
         WHERE id=? AND tenant_id=?`,data.borrower,data.asset_type,data.address,data.certificate_type,data.certificate_no,data.nib,data.ownership_name,data.land_area,data.building_area,data.legal_status,data.notes,id,actor.tenant_id);
       await audit(db,actor,'ASSET',id,'UPDATE');return response({ok:true});
+    }
+    if(sub==='offer-analysis'&&request.method==='GET'){
+      const comps=await all(db,'SELECT offering_price,included FROM comparables WHERE tenant_id=? AND asset_id=?',actor.tenant_id,id);
+      return response(analyzeComparableOffers(comps));
+    }
+    if(sub==='spatial-screen'&&request.method==='POST'){
+      guard(['ADMIN','MAKER','CHECKER','REVIEWER','APPROVER'].includes(actor.role),'Peran ini tidak dapat mengajukan skrining spasial.');
+      const result=screenSpatialEvidence(await readBody(request));
+      await audit(db,actor,'ASSET',id,'MANUAL_SPATIAL_SCREEN',{source_type:result.source_type,flags:result.flags});
+      return response(result);
+    }
+    if(sub==='ocr-review'&&request.method==='POST'){
+      guard(canEditAsset(actor,asset),'Hanya Maker atau Admin dapat memeriksa usulan OCR pada draft/returned.');
+      const body=await readBody(request),result=normalizeOcrReview(body.fields);
+      await audit(db,actor,'ASSET',id,'OCR_CANDIDATE_REVIEW',{fields:result.suggestions.map(x=>x.field)});
+      return response(result);
     }
     if(sub==='appraisal'&&request.method==='PUT'){
       guard(canEditAsset(actor,asset),'Penilaian hanya dapat diubah pada Draft/Returned oleh Maker.');
