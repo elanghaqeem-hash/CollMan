@@ -54,6 +54,12 @@ async function fetchAsset(db,actor,id){
   guard(asset,'Agunan tidak ditemukan.',404);return asset;
 }
 const canEditAsset=(actor,asset)=> (actor.role==='ADMIN'||actor.role==='MAKER'&&asset.created_by===actor.id)&&['DRAFT','RETURNED'].includes(asset.status);
+async function lockEditableAsset(tx,actor,id) {
+  const current=await row(tx,'SELECT id,status,created_by FROM assets WHERE id=? AND tenant_id=? FOR UPDATE',id,actor.tenant_id);
+  guard(current,'Agunan tidak ditemukan.',404);
+  guard(canEditAsset(actor,current),'Status agunan berubah atau tidak berwenang.',409);
+  return current;
+}
 const safeNote = value=>optional(value,2000);
 
 async function authRoutes(request,env,db,path) {
