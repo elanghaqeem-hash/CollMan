@@ -56,15 +56,23 @@ export class PostgresAdapter {
   }
 }
 
-let pool;
-export function getPostgres() {
-  if(!process.env.DATABASE_URL) throw new Error('DATABASE_URL is missing');
-  const url=new URL(process.env.DATABASE_URL);
+/** Runtime uses an optional pooled URL. Schema migrations always use the direct URL.
+ * Marketplace Prisma Postgres sets DATABASE_URL to a direct endpoint, not its pooler.
+ */
+export function selectDatabaseUrl(env, {useDirect=false}={}) {
+  const value=(!useDirect && env.DATABASE_URL_POOLED) || env.DATABASE_URL;
+  if(!value) throw new Error('DATABASE_URL is missing');
+  const url=new URL(value);
   if(!['postgres:','postgresql:'].includes(url.protocol)) throw new Error('PostgreSQL URL required');
-  if(process.env.VERCEL_ENV==='production' && !['require','verify-ca','verify-full'].includes(url.searchParams.get('sslmode')))
+  if(env.VERCEL_ENV==='production' && !['require','verify-ca','verify-full'].includes(url.searchParams.get('sslmode')))
     throw new Error('Production database must configure TLS with sslmode=require or stronger');
+  return value;
+}
+let pool;
+export function getPostgres({useDirect=false}={}) {
+  const connectionString=selectDatabaseUrl(process.env,{useDirect});
   if(!pool) {
-    pool=new Pool({connectionString:process.env.DATABASE_URL,max:2,idleTimeoutMillis:10000,connectionTimeoutMillis:5000,allowExitOnIdle:true});
+    pool=new Pool({connectionString,max:2,idleTimeoutMillis:10000,connectionTimeoutMillis:5000,allowExitOnIdle:true});
     pool.on('error',err=>console.error('CollMan PostgreSQL idle connection error:',err.code||'unknown'));
   }
   return new PostgresAdapter(pool);
