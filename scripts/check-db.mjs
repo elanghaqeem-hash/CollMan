@@ -25,6 +25,11 @@ try {
     WHERE connamespace = current_schema()::regnamespace AND contype='f'`);
   const fkSet=new Set(constraints.rows.map(x=>x.conname));
   for(const name of requiredConstraints) if(!fkSet.has(name)) throw new Error('Missing tenant FK: '+name);
+  const activeTriggers=await client.query(`SELECT tgname
+    FROM pg_trigger WHERE NOT tgisinternal AND tgenabled IN ('O','A')`);
+  const triggerSet=new Set(activeTriggers.rows.map(x=>x.tgname));
+  for(const trigger of ['collman_audit_immutable','collman_workflow_immutable'])
+    if(!triggerSet.has(trigger)) throw new Error('Missing audit history protection: '+trigger);
   const rows=await client.query('SELECT version,checksum FROM schema_migrations');
   if(rows.rowCount!==files.length) throw new Error('Unexpected PostgreSQL migration count');
   for(const file of files) {
@@ -46,7 +51,7 @@ try {
       WHERE l.tenant_id<>u.tenant_id) AS audit`);
   if(Object.values(unsafe.rows[0]).some(x=>Number(x)!==0)) throw new Error('Cross-tenant data relation detected');
   await client.query('COMMIT');
-  console.log('PASS: PostgreSQL schema checksums, required tables, tenant FK constraints, cross-tenant data integrity');
+  console.log('PASS: PostgreSQL schema checksums, required tables, tenant FK constraints, immutable audit triggers, cross-tenant data integrity');
 }catch(error) {
   try{await client.query('ROLLBACK');}catch{}
   console.error('PostgreSQL preflight FAILED:',error.message);
