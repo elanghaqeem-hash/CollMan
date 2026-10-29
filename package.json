@@ -11,7 +11,8 @@
     "deploy": "npx --yes wrangler@4.155.0 deploy",
     "test:integration": "node --test tests/vercel-api.integration.test.mjs",
     "db:migrate": "node scripts/migrate-postgres.mjs",
-    "db:verify": "node scripts/check-db.mjs"
+    "db:verify": "node scripts/check-db.mjs",
+    "test:live": "node scripts/verify-preview.mjs"
   },
   "engines": {
     "node": ">=20"
