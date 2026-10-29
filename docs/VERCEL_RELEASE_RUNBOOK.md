@@ -15,8 +15,8 @@ Production activation is intentionally **BLOCKED** until the checks below pass. 
 ## Source and secrets
 1. In Vercel project `collman`, maintain Git integration to `elanghaqeem-hash/CollMan`.
 2. Framework preset: Other; Root Directory `./`; Output Directory `public`; build `npm run build`. The repository `vercel.json` defines these settings.
-3. Provision **dedicated** managed PostgreSQL (e.g. through an approved Vercel marketplace integration) with backups and access restrictions; production DB must be distinct from CI/preview DB.
-4. Set `DATABASE_URL` via Vercel Environment Variables, not source. Production DSN must use `sslmode=require` or stronger, with certificate verification according to provider guidance.
+3. Provision **dedicated** managed PostgreSQL using the **already installed Prisma Postgres Marketplace integration** in team `serayamg` (Vercel team slug `collman`). The Vercel connector cannot provision Marketplace resources directly; use project `collman` → Storage → Create Database → Prisma Postgres. Select `sin1` (Singapore) region and an approved plan; separate production and preview databases must be used. Do not share real customer or appraisal data with CI/preview.
+4. Connect the new database to the Vercel project. The integration injects `DATABASE_URL` (direct Postgres connection) and related variables into selected environments. Production DSN must use `sslmode=require` or stronger; review certificate validation with the provider. Create a separate `DATABASE_URL_POOLED` for application runtime from Prisma Console's pooled connection string, keeping `DATABASE_URL` direct for migrations. Never paste a credential into GitHub or a chat.
 5. Set a random 32+-character `BOOTSTRAP_TOKEN` via the Vercel secret settings only for initial admin creation; rotate/remove after bootstrap. Never disclose it in logs or tickets.
 6. Do not reuse Cloudflare session tokens or blindly copy unvalidated DB state.
 
@@ -53,4 +53,4 @@ Immediately before switch:
 If any production check fails, pause writes, restore the previous production deployment or remove active routing to unverified release; preserve DB backup and audit. Do not redirect users back to Cloudflare until data consistency and authorized credentials are confirmed.
 
 ## Outstanding prerequisite
-Vercel connector currently does not enumerate/access team `serayamg`; a team owner must authorize the Vercel connection before remote project inspection or deployment. No production PostgreSQL service or environment variables were provisioned during this development session.
+Vercel access **now confirmed** for team ID `team_Y6DNKOu4wHEjmSax8LeZ1B7J` (name `serayamg`; dashboard slug `collman`). Project ID `prj_XfJOcY7dzut4OdM1Tx2cbyfpZflW`, bound to `elanghaqeem-hash/CollMan`. Preview commit `fef5ff4a` was READY; domain `collman-lemon.vercel.app` verified, but no production deployment is live. Project environment variables are empty and no database is provisioned. Prisma Postgres Vercel Marketplace integration is installed but no resources are connected. Create project database and secure secrets before migration and live UAT.
