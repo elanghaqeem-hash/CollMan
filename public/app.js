@@ -77,6 +77,18 @@ function assetDetail(){const d=state.detail;if(!d)return empty('Agunan belum dip
  `<section class="card"><div class="card-head"><div><h2>Identitas & Legalitas Agunan</h2><p>${esc(a.address)}</p></div>${badge(a.status)}</div><div class="info-grid">${fields.map(([k,val])=>`<div><div class="key">${esc(k)}</div><div class="value">${esc(String(val))}</div></div>`).join('')}</div>${a.notes?`<div class="divider"></div><div class="small muted">Catatan: ${esc(a.notes)}</div>`:''}</section>
  <section class="card"><div class="card-head"><div><h2>Hasil Penilaian & Quick Appraisal</h2><p>Nilai pasar, haircut dan indikasi nilai likuidasi</p></div>${canEdit?btn('edit-appraisal',v?'Ubah Penilaian':'+ Tambah Penilaian','small'):''}</div>
  ${v?`<div class="metrics" style="margin-bottom:0;grid-template-columns:repeat(3,minmax(0,1fr))"><div class="kpi-mini"><div class="small muted">Nilai pasar</div><span class="val">${money(v.market_value)}</span></div><div class="kpi-mini"><div class="small muted">Total haircut</div><span class="val">${v.total_haircut_pct}%</span><div class="small muted">Dasar ${v.base_haircut_pct}% + risiko ${v.risk_haircut_pct}%</div></div><div class="kpi-mini"><div class="small muted">Indikasi likuidasi</div><span class="val">${money(v.liquidation_value)}</span></div></div><div class="section-label">Risiko lokasi yang ditandai</div><div class="legend">${Object.entries(riskLabels).filter(([k])=>v.risk_flags[k]).map(([k,l])=>`<span class="pill RETURNED">! ${esc(l)}</span>`).join('')||'<span class="muted">Belum ada bendera risiko ditandai</span>'}</div><p class="field-note" style="margin:15px 0 0">Tanggal penilaian: ${esc(v.valuation_date)}. ${esc(v.notes||'')} Nilai bersifat indikatif, menunggu validasi penilai berwenang.</p>`:empty('Penilaian belum tersedia','Isi market value dan parameter haircut sebelum mengirim untuk review.')}</section>
+ <section class="card"><div class="card-head"><div><h2>Analisis Bukti & Skrining Spasial</h2><p>Bahan kajian yang belum terverifikasi — bukan hasil resmi ATR/BPN atau AI appraisal</p></div><button type="button" class="btn small" data-action="offer-analysis">Analisis Harga Pembanding</button></div>
+ <div id="evidence-result" class="notice warn">Analisis penawaran dihitung dari input pembanding. OCR, ATR/BPN, AI, dan penyedia GIS resmi masih memerlukan konektor serta UAT.</div>
+ <form id="spatial-form"><h3>Pemeriksaan jarak risiko (koordinat manual)</h3><div class="formgrid">
+ <div class="form-group"><label>Latitude agunan</label><input class="field" type="number" name="latitude" step="any" min="-90" max="90" required></div>
+ <div class="form-group"><label>Longitude agunan</label><input class="field" type="number" name="longitude" step="any" min="-180" max="180" required></div>
+ <div class="form-group"><label>Jenis objek risiko</label><select class="field" name="hazard_type"><option value="banjir">Banjir</option><option value="sutet">SUTET</option><option value="tpu">TPU</option><option value="jalur_hijau">Jalur hijau</option><option value="akses_jalan">Akses jalan</option><option value="perubahan_ilegal">Perubahan ilegal</option></select></div>
+ <div class="form-group"><label>Latitude objek risiko</label><input class="field" type="number" name="hazard_lat" step="any" min="-90" max="90" required></div>
+ <div class="form-group"><label>Longitude objek risiko</label><input class="field" type="number" name="hazard_lon" step="any" min="-180" max="180" required></div>
+ <div class="form-group"><label>Radius pemeriksaan (meter)</label><input class="field" type="number" name="radius_m" min="0" max="10000" value="100" required></div>
+ <div class="form-group wide"><label>Sumber / referensi bukti</label><input class="field" name="source" maxlength="300" required placeholder="Contoh: hasil survei internal / dokumen sumber"></div></div>
+ <p class="field-note">Jarak garis lurus saja; bukan analisis poligon banjir/zona peruntukan dan tidak menetapkan legalitas.</p>
+ <button type="submit" class="btn small">Hitung jarak & tandai risiko</button></form></section>
  <div class="two-col"><section class="card"><div class="card-head"><div><h2>Data Pembanding</h2><p>Referensi harga dari sumber yang dicatat user</p></div>${canEdit?btn('new-comparable','+ Pembanding','small'):''}</div>${d.comparables.length?table(['Pembanding','Harga penawaran',''],d.comparables.map(c=>`<tr><td class="wrap"><strong>${esc(c.description)}</strong><div class="small muted">${esc(c.address||'')}</div>${c.source_url?`<a href="${esc(c.source_url)}" target="_blank" rel="noopener noreferrer">Sumber ↗</a>`:''}</td><td>${money(c.offering_price)}</td><td>${canEdit?`<button class="linkbtn" data-delete-comparable="${esc(c.id)}">Hapus</button>`:''}</td></tr>`)):empty('Belum ada pembanding','Tambahkan sumber pembanding yang dapat diverifikasi.')}</section>
  <section class="card"><div class="card-head"><div><h2>Workflow & Keputusan</h2><p>Tahapan pemeriksaan berjenjang</p></div></div>${stepper}<div class="divider"></div>${canTransition.length?`<div class="form-group"><label>Catatan keputusan</label><textarea id="workflow-note" class="field" placeholder="Alasan pengembalian / penolakan wajib diisi."></textarea></div><div class="actions">${canTransition.map(action=>`<button class="btn ${action==='APPROVE'?'teal':action==='REJECT'?'danger':action==='RETURN'?'':'primary'}" data-transition="${action}">${actionText[action]}</button>`).join('')}</div>`:`<div class="notice warn">Tidak ada aksi workflow yang tersedia untuk peran atau status saat ini.</div>`}</section></div>
  <section class="card"><div class="card-head"><div><h2>Riwayat Persetujuan</h2><p>Jejak peristiwa workflow per agunan</p></div></div>${d.history.length?`<div class="timeline">${d.history.map(h=>`<div class="timeline-item"><strong>${esc(actionText[h.action]||h.action)}</strong> oleh ${esc(h.actor_name)} ${badge(h.to_status)}<small>${formatDate(h.created_at)} ${h.note?'• '+esc(h.note):''}</small></div>`).join('')}</div>`:empty('Belum ada tindakan workflow','Riwayat akan muncul setelah pengajuan pertama.')}</section>`;
@@ -114,6 +126,18 @@ async function onSubmit(event){const form=event.target;if(!form.id)return;event.
    await api(`/api/assets/${state.detail.asset.id}/appraisal`,{method:'PUT',body});await loadView();notify('Penilaian berhasil disimpan.');
   }else if(form.id==='comparable-form'){
    await api(`/api/assets/${state.detail.asset.id}/comparables`,{method:'POST',body:formObj(form)});await loadView();notify('Data pembanding disimpan.');
+  }else if(form.id==='spatial-form'){
+   const v=formObj(form),id=state.detail.asset.id;
+   const result=await api('/api/assets/'+encodeURIComponent(id)+'/spatial-screen',{method:'POST',body:{
+     latitude:v.latitude,longitude:v.longitude,hazards:[{type:v.hazard_type,latitude:v.hazard_lat,
+     longitude:v.hazard_lon,radius_m:v.radius_m,source:v.source}]}});
+   const e=document.getElementById('evidence-result');
+   if(e){e.replaceChildren();const p=document.createElement('p');
+     p.textContent='Jarak: '+result.objects[0].distance_m+' m; dalam radius: '+(result.objects[0].within_radius?'YA':'TIDAK')+'. '+result.notice;
+     e.appendChild(p);const a=document.createElement('a');
+     a.href='https://www.openstreetmap.org/?mlat='+encodeURIComponent(result.latitude)+'&mlon='+encodeURIComponent(result.longitude)+'#map=16/'+encodeURIComponent(result.latitude)+'/'+encodeURIComponent(result.longitude);
+     a.target='_blank';a.rel='noopener noreferrer';a.textContent='Lihat titik di peta umum OpenStreetMap (tanpa layer risiko resmi)';
+     e.appendChild(a);}
   }else if(form.id==='settings-form'){
    await api('/api/settings',{method:'PUT',body:{risk_weights:formObj(form)}});await loadView();notify('Parameter risiko berhasil diperbarui.');
   }else if(form.id==='user-form'){
@@ -138,6 +162,16 @@ async function onClick(event){const nav=event.target.closest('[data-nav]');if(na
   if(action==='edit-appraisal'){document.getElementById('page').innerHTML=appraisalForm();return;}
   if(action==='new-comparable'){document.getElementById('page').innerHTML=comparableForm();return;}
   if(action==='filter'){state.search=document.getElementById('search').value;state.status=document.getElementById('status-filter').value;await loadView();return;}
+  if(action==='offer-analysis'){
+   try{const d=await api('/api/assets/'+encodeURIComponent(state.detail.asset.id)+'/offer-analysis');
+     const e=document.getElementById('evidence-result');
+     if(e)e.textContent=d.status==='INSUFFICIENT_EVIDENCE'?
+       'Bukti belum cukup: '+d.count+' pembanding, minimum '+d.minimum_required+'. '+d.notice:
+       'Harga penawaran manual (bukan nilai pasar): terendah '+money(d.lowest_offer)+
+       ', median '+money(d.median_offer)+', tertinggi '+money(d.highest_offer)+
+       ' dari '+d.count+' pembanding. '+d.notice;
+   }catch(e){notify(e.message,true);}return;
+  }
   if(action==='print'){window.print();return;}
   if(action==='export-csv'){const data=state.list?.records||[];const heads=['Referensi','Debitur','Jenis','Alamat','Status','Nilai Pasar','Indikasi Likuidasi'];const vals=data.map(a=>[a.reference_no,a.borrower,a.asset_type,a.address,a.status,a.market_value||0,a.liquidation_value||0]);
    const clean=v=>{let s=String(v??'');if(/^[=+\-@\t\r]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';};const csv=[heads,...vals].map(row=>row.map(clean).join(',')).join('\r\n');const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='collman-agunan.csv';a.click();URL.revokeObjectURL(url);return;}
