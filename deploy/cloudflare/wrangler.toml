@@ -1,0 +1,6 @@
+name = "collman"
+main = "worker.mjs"
+compatibility_date = "2026-10-29"
+workers_dev = true
+
+# ASUMSI: only a protected, stateless calculation pilot. Do not submit customer data.
