@@ -9,7 +9,7 @@ Production activation is intentionally **BLOCKED** until the checks below pass. 
 - Backend: `api/index.js` Vercel Node.js Function, rewriting `/api/:path*` via `vercel.json`.
 - Domain logic and security: `src/vercel-api.js` + unchanged `src/domain.js`.
 - Database: dedicated PostgreSQL 16+ instance, via pooled `pg` with parameterized queries and atomic workflow transactions.
-- Data model: `migrations/postgres/0001_initial.sql` and `0002_tenant_integrity.sql`; database-level tenant foreign keys reject cross-tenant references. Both migrations are applied in one transaction by `npm run db:migrate`.
+- Data model: versioned SQL migrations `0001_initial.sql` through `0004_financial_integrity.sql`. They enforce tenant foreign keys, append-only audit/history, and financial/status CHECK constraints. All unapplied migrations are executed atomically by `npm run db:migrate`.
 - Cloudflare: retained as rollback source until controlled cutover and signoff.
 
 ## Source and secrets
@@ -26,8 +26,8 @@ Production activation is intentionally **BLOCKED** until the checks below pass. 
 - Node HTTP adapter: `node --test tests/vercel-handler.integration.test.mjs`.
 - Chromium desktop/mobile: `node --test tests/frontend.e2e.mjs` after installing Playwright; executed via GitHub Actions.
 - Run the schema migrator a second time: checksum validated, no duplicate migration.
-- `npm run db:verify` is read-only and checks migration checksums, required tables, database-level tenant FK constraints, and cross-tenant joins. Check financial numeric precision and role isolation separately.
-- Verify preview URL: `/`, `/styles.css`, `/app.js`, `/api/health`, `/api/meta`; browser login and menu navigation; unauthorized API access must fail closed.
+- `npm run db:verify` is read-only and checks migration checksums, required tables, database-level tenant foreign keys, immutable audit triggers, financial/status constraints, and cross-tenant joins. Check financial numeric precision and role isolation separately.
+- On a reviewed preview, execute `COLLMAN_BASE_URL=https://collman-<preview>.vercel.app npm run test:live` to check static assets, `/api/health`, `/api/meta`, and anonymous access controls without mutating database contents. Vercel Deployment Protection may require `VERCEL_AUTOMATION_BYPASS_SECRET`; obtain it through protected CI secrets, never paste into a chat. Browser login/menu navigation must also pass.
 - Perform negative IDOR, password/session, CSRF/origin and maker-self-approval tests on the live preview against **isolated** data.
 
 ## Cloudflare data re-verification (read-only)
@@ -42,9 +42,9 @@ Immediately before switch:
 **Release only after ALL are true:**
 - All GitHub Actions checks are green for the exact target commit.
 - Vercel plan must permit commercial use (Hobby is limited to personal/non-commercial usage; Pro or Enterprise required for banking rollout).
-- PostgreSQL production database provisioned, TLS connection verified, migrations 0001/0002 applied, `npm run db:verify` passed, and backup/restore tested.
+- PostgreSQL production database provisioned, TLS connection verified, migrations 0001–0004 applied, `npm run db:verify` and the live read-only smoke tests passed, and an encrypted backup/restore rehearsal was successful.
 - Separate preview end-to-end UAT passed for admin, maker, checker, reviewer, approver, auditor and mobile.
-- Negative tests for IDOR, self-approval, session expiration and CSRF passed.
+- Negative tests for IDOR, maker self-approval, session expiration, CSRF, concurrent updates, audit tampering and invalid monetary/status values passed.
 - Cloudflare inventory rechecked immediately prior to cutover and reconciled.
 - Vercel project/team access and preview deployment verified; production domain `collman-lemon.vercel.app` assigned to READY deployment.
 - Production health and access checks passed without placing real bank PII into public environments.
