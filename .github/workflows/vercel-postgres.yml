@@ -1,0 +1,56 @@
+name: CollMan Vercel PostgreSQL migration gates
+on:
+  push:
+    branches: ["migration/vercel-postgres"]
+  pull_request:
+    paths:
+      - "api/**"
+      - "src/**"
+      - "migrations/postgres/**"
+      - "tests/**"
+      - "scripts/**"
+      - "public/**"
+      - "vercel.json"
+      - "package*.json"
+      - ".github/workflows/vercel-postgres.yml"
+permissions:
+  contents: read
+jobs:
+  postgres-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: collman_ci
+          POSTGRES_USER: collman
+          POSTGRES_PASSWORD: ci_only_not_production
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U collman -d collman_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DATABASE_URL: postgresql://collman:ci_only_not_production@localhost:5432/collman_ci
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install pinned dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check source, frontend and business-rule tests (no production credentials)
+        run: npm run build
+        env:
+          DATABASE_URL: ""
+      - name: Apply isolated PostgreSQL schema
+        run: npm run db:migrate
+      - name: API integration (RBAC, segregation of duties, approvals, audit, tenant)
+        run: npm run test:integration
+      - name: Standalone Node HTTP handler smoke test
+        run: node --test tests/vercel-handler.integration.test.mjs
+      - name: Confirm migration is idempotent
+        run: npm run db:migrate
