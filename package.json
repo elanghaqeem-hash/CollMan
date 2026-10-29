@@ -10,5 +10,10 @@
     "build": "npm run check && npm test",
     "deploy": "npx --yes wrangler@4.155.0 deploy"
   },
-  "engines": {"node": ">=20"}
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@libsql/client": "0.18.0"
+  }
 }
