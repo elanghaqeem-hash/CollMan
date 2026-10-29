@@ -90,8 +90,8 @@ async function authRoutes(request,env,db,path) {
     const hash=user?await hashPassword(password,user.password_salt):null;
     if(!user || !constantEquals(hash,user.password_hash)){
       await run(db,`INSERT INTO login_attempts (identifier_hash,attempts,window_start) VALUES (?,1,datetime('now'))
-        ON CONFLICT(identifier_hash) DO UPDATE SET attempts=CASE WHEN window_start<datetime('now','-15 minutes') THEN 1 ELSE attempts+1 END,
-        window_start=CASE WHEN window_start<datetime('now','-15 minutes') THEN datetime('now') ELSE window_start END`,attemptKey);
+        ON CONFLICT(identifier_hash) DO UPDATE SET attempts=CASE WHEN login_attempts.window_start<datetime('now','-15 minutes') THEN 1 ELSE login_attempts.attempts+1 END,
+        window_start=CASE WHEN login_attempts.window_start<datetime('now','-15 minutes') THEN datetime('now') ELSE login_attempts.window_start END`,attemptKey);
       throw problem('Email atau password salah.',401);
     }
     await run(db,'DELETE FROM login_attempts WHERE identifier_hash=?',attemptKey);
