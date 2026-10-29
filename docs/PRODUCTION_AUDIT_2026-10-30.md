@@ -25,7 +25,7 @@ The labels are reversed relative to intended environment roles. Runtime producti
 
 ## Mandatory safe remediation
 1. Suspend onboarding real customers or banking collateral records; keep current production deployed only for explicitly permitted non-commercial testing.
-2. Using approved DB administrator access, perform **read-only inventories** separately on both resources:
+2. Using approved DB administrator access, run the vetted **read-only SQL script** in [`docs/sql/production-database-inventory-readonly.sql`](sql/production-database-inventory-readonly.sql) separately against each resource. Record results without row-level customer data:
    - `SELECT version, checksum FROM schema_migrations ORDER BY version`
    - Counts from `tenants`, `users`, `assets`, `appraisals`, `comparables`, `workflow_history`, `audit_log`; do not export individual PII in audit reports.
    - Confirm foreign keys, database-level immutability triggers, statuses, numeric checks, and duplicate/tenant integrity.
