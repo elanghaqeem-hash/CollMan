@@ -16,15 +16,19 @@ function getClient() {
   return client;
 }
 
+
+function rowsAsObjects(result) {
+  return result.rows.map(row=>Object.fromEntries(result.columns.map((name,index)=>[name,row[index]])));
+}
 class Statement {
   constructor(executor,sql,args=[]) {this.executor=executor;this.sql=sql;this.args=args;}
   bind(...args){return new Statement(this.executor,this.sql,args);}
   async execute(){return this.executor.execute({sql:this.sql,args:this.args});}
-  async first(){return (await this.execute()).rows[0]??null;}
-  async all(){return {results:(await this.execute()).rows};}
+  async first(){return rowsAsObjects(await this.execute())[0]??null;}
+  async all(){return {results:rowsAsObjects(await this.execute())};}
   async run(){const result=await this.execute();return {meta:{changes:result.rowsAffected}};}
 }
-class Database {
+export class Database {
   constructor(executor){this.executor=executor;}
   prepare(sql){return new Statement(this.executor,sql);}
   async batch(items){return this.executor.batch(items.map(s=>({sql:s.sql,args:s.args})), 'write');}
