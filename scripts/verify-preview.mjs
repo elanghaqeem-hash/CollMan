@@ -45,6 +45,15 @@ await check('PostgreSQL health','/api/health',200,async r=>{
 });
 await check('Product metadata','/api/meta',200,async r=>{
   const json=await r.json();
+  if(json.needs_setup===true) {
+    console.error('RELEASE BLOCKER: no administrator has completed initial setup.');
+    return false;
+  }
+  if(json.needs_setup!==false) {
+    console.error('RELEASE BLOCKER: invalid administrator readiness state.');
+    return false;
+  }
+  console.log('PASS: administrator setup completed');
   return json.product==='CollMan' && Array.isArray(json.roles) && json.roles.includes('AUDITOR');
 });
 for(const [name,path] of [['Anonymous dashboard','/api/dashboard'],['Anonymous users','/api/users'],['Anonymous audit','/api/audit']])
