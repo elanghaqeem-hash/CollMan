@@ -7,3 +7,13 @@
 @media(max-width:1100px){.metrics{grid-template-columns:repeat(2,1fr)}.split{grid-template-columns:1fr}.main-body{padding:25px}.sidebar{width:230px}.shell{grid-template-columns:230px minmax(0,1fr)}}
 @media(max-width:780px){.shell{display:block}.sidebar{position:fixed;z-index:11;left:0;top:0;transform:translateX(-100%);transition:transform .25s;width:250px}.sidebar.open{transform:translateX(0)}.mobile-overlay{display:block;position:fixed;inset:0;z-index:10;background:#10192880}.mobile-overlay[hidden]{display:none}.mobile-menu{display:inline-grid}.topbar{height:65px;padding:0 17px}.main-body{padding:22px 15px 35px}.pagehead{flex-direction:column}.formgrid,.info-grid,.two-col{grid-template-columns:1fr}.metrics{gap:11px}.metric{padding:15px}.metric .metric-number{font-size:22px}.auth-screen{grid-template-columns:1fr}.auth-hero{display:none}.auth-right{min-height:100vh}.risk-grid{grid-template-columns:1fr}.card{padding:17px}.progress-row{grid-template-columns:100px 1fr 25px}}
 @media(max-width:420px){.metrics{grid-template-columns:1fr 1fr}.top-right .small{display:none}.btn{padding:9px 12px}.metric .metric-number{font-size:19px}}
+
+/* Browser-tested mobile containment: allow table cards to shrink within single-column grids,
+   while preserving horizontal scrolling inside the table itself. */
+@media(max-width:780px){
+  .shell,.main,.main-body,.card{min-width:0;max-width:100%}
+  .split,.two-col,.formgrid,.info-grid{grid-template-columns:minmax(0,1fr)}
+  .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .card-head{min-width:0;flex-wrap:wrap}
+  .tablewrap{min-width:0;max-width:100%;overflow-x:auto}
+}
