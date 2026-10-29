@@ -9,7 +9,7 @@ Production activation is intentionally **BLOCKED** until the checks below pass. 
 - Backend: `api/index.js` Vercel Node.js Function, rewriting `/api/:path*` via `vercel.json`.
 - Domain logic and security: `src/vercel-api.js` + unchanged `src/domain.js`.
 - Database: dedicated PostgreSQL 16+ instance, via pooled `pg` with parameterized queries and atomic workflow transactions.
-- Data model: `migrations/postgres/0001_initial.sql`; schema is applied explicitly by `npm run db:migrate`.
+- Data model: `migrations/postgres/0001_initial.sql` and `0002_tenant_integrity.sql`; database-level tenant foreign keys reject cross-tenant references. Both migrations are applied in one transaction by `npm run db:migrate`.
 - Cloudflare: retained as rollback source until controlled cutover and signoff.
 
 ## Source and secrets
@@ -22,11 +22,11 @@ Production activation is intentionally **BLOCKED** until the checks below pass. 
 
 ## Validation
 - Unit/static gate: `npm ci && npm run build`.
-- Isolated PostgreSQL integration: `npm run db:migrate && npm run test:integration`.
+- Isolated PostgreSQL integration: `npm run db:migrate && npm run db:verify && npm run test:integration && npm run db:verify`.
 - Node HTTP adapter: `node --test tests/vercel-handler.integration.test.mjs`.
 - Chromium desktop/mobile: `node --test tests/frontend.e2e.mjs` after installing Playwright; executed via GitHub Actions.
 - Run the schema migrator a second time: checksum validated, no duplicate migration.
-- Audit `schema_migrations`; verify foreign keys, multi-tenant boundaries, data numeric precision and role isolation.
+- `npm run db:verify` is read-only and checks migration checksums, required tables, database-level tenant FK constraints, and cross-tenant joins. Check financial numeric precision and role isolation separately.
 - Verify preview URL: `/`, `/styles.css`, `/app.js`, `/api/health`, `/api/meta`; browser login and menu navigation; unauthorized API access must fail closed.
 - Perform negative IDOR, password/session, CSRF/origin and maker-self-approval tests on the live preview against **isolated** data.
 
@@ -41,7 +41,8 @@ Immediately before switch:
 ## Production cutover gate
 **Release only after ALL are true:**
 - All GitHub Actions checks are green for the exact target commit.
-- PostgreSQL production database provisioned, TLS connection verified, migration applied and backup/restore tested.
+- Vercel plan must permit commercial use (Hobby is limited to personal/non-commercial usage; Pro or Enterprise required for banking rollout).
+- PostgreSQL production database provisioned, TLS connection verified, migrations 0001/0002 applied, `npm run db:verify` passed, and backup/restore tested.
 - Separate preview end-to-end UAT passed for admin, maker, checker, reviewer, approver, auditor and mobile.
 - Negative tests for IDOR, self-approval, session expiration and CSRF passed.
 - Cloudflare inventory rechecked immediately prior to cutover and reconciled.
@@ -53,4 +54,4 @@ Immediately before switch:
 If any production check fails, pause writes, restore the previous production deployment or remove active routing to unverified release; preserve DB backup and audit. Do not redirect users back to Cloudflare until data consistency and authorized credentials are confirmed.
 
 ## Outstanding prerequisite
-Vercel access **now confirmed** for team ID `team_Y6DNKOu4wHEjmSax8LeZ1B7J` (name `serayamg`; dashboard slug `collman`). Project ID `prj_XfJOcY7dzut4OdM1Tx2cbyfpZflW`, bound to `elanghaqeem-hash/CollMan`. Preview commit `fef5ff4a` was READY; domain `collman-lemon.vercel.app` verified, but no production deployment is live. Project environment variables are empty and no database is provisioned. Prisma Postgres Vercel Marketplace integration is installed but no resources are connected. Create project database and secure secrets before migration and live UAT.
+Vercel access **now confirmed** for team ID `team_Y6DNKOu4wHEjmSax8LeZ1B7J` (name `serayamg`; dashboard slug `collman`). Project ID `prj_XfJOcY7dzut4OdM1Tx2cbyfpZflW`, bound to `elanghaqeem-hash/CollMan`. Preview commit `fef5ff4a` was READY; domain `collman-lemon.vercel.app` verified, but no production deployment is live. Project environment variables are empty and no database is provisioned. Prisma Postgres Vercel Marketplace integration is installed but no resources are connected. Create project database and secure secrets before migration and live UAT. The Prisma Postgres Marketplace integration's Free plan is useful for non-commercial isolated UAT only; use an appropriate contracted plan, backups and controls for bank production.
