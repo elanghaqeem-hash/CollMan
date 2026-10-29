@@ -1,0 +1,17 @@
+{
+  "name": "collman",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"],
+    "not_found_handling": "single-page-application"
+  },
+  "durable_objects": {
+    "bindings": [{"name": "COLLMAN_STORE", "class_name": "CollManStore"}]
+  },
+  "migrations": [{"tag": "v1-collman-sqlite", "new_sqlite_classes": ["CollManStore"]}],
+  "observability": {"enabled": true}
+}

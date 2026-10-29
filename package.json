@@ -1,0 +1,14 @@
+{
+  "name": "collman",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Collateral Management System — Cloudflare Workers and D1",
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "build": "npm run check && npm test",
+    "deploy": "npx --yes wrangler@4.155.0 deploy"
+  },
+  "engines": {"node": ">=20"}
+}

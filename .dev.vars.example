@@ -1,0 +1,2 @@
+# Only for local development. NEVER commit real values.
+BOOTSTRAP_TOKEN=replace-with-a-long-random-token

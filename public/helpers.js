@@ -1,0 +1,6 @@
+/** Browser-only rendering helpers. All dynamic text is escaped before HTML templates. */
+export function escapeText(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+export function currency(value){return value===null||value===undefined?'—':'Rp '+Number(value).toLocaleString('id-ID',{maximumFractionDigits:0});}
+export const riskLabels={banjir:'Rawan Banjir',sutet:'SUTET / Tegangan Tinggi',tpu:'TPU / Makam',jalur_hijau:'Jalur Hijau',akses_jalan:'Akses Jalan Bermasalah',perubahan_ilegal:'Perubahan Bangunan Ilegal'};
+export const statusText={DRAFT:'Draft',SUBMITTED:'Menunggu Checker',REVIEWED:'Menunggu Reviewer',RECOMMENDED:'Menunggu Approver',APPROVED:'Disetujui',RETURNED:'Perlu Perbaikan',REJECTED:'Ditolak'};
+export const actionText={SUBMIT:'Kirim ke Checker',CHECK:'Selesai Pemeriksaan',RECOMMEND:'Rekomendasikan',APPROVE:'Setujui',REJECT:'Tolak',RETURN:'Kembalikan'};
