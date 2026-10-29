@@ -6,7 +6,7 @@ import {getPostgres} from '../src/postgres.js';
 const filename=new URL('../migrations/postgres/0001_initial.sql',import.meta.url);
 const sql=await readFile(filename,'utf8');
 const checksum=createHash('sha256').update(sql).digest('hex');
-const db=getPostgres();
+const db=getPostgres({useDirect:true});
 const client=await db.pool.connect();
 try{
   await client.query('BEGIN');
