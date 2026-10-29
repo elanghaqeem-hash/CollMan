@@ -104,6 +104,20 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   assert.equal((await call('POST','/api/assets/'+secondId+'/transition',{action:'REJECT',note:'Policy exception'},approver)).status,200);
   assert.equal((await call('GET','/api/assets/'+secondId,undefined,admin)).data.asset.status,'REJECTED');
   const db=getPostgres();
+  const immutableAudit=await db.prepare('SELECT id FROM audit_log WHERE action=? LIMIT 1').bind('APPROVE').first();
+  assert.ok(immutableAudit?.id);
+  await assert.rejects(
+    db.prepare('DELETE FROM audit_log WHERE id=?').bind(immutableAudit.id).run(),
+    {code:'23514'}
+  );
+  const immutableWorkflow=await db.prepare('SELECT id FROM workflow_history WHERE asset_id=? LIMIT 1').bind(id).first();
+  assert.ok(immutableWorkflow?.id);
+  await assert.rejects(
+    db.prepare('UPDATE workflow_history SET note=? WHERE id=?')
+      .bind('Unapproved change',immutableWorkflow.id).run(),
+    {code:'23514'}
+  );
+  assert.equal((await call('PUT','/api/assets/'+id+'/appraisal',{market_value:2,base_haircut_pct:1},maker)).status,403);
   await db.prepare('INSERT INTO tenants(id,name) VALUES (?,?)').bind('test-tenant-2','UAT B').run();
   await db.prepare('INSERT INTO users(id,tenant_id,email,display_name,role,password_hash,password_salt) VALUES (?,?,?,?,?,?,?)')
     .bind('test-other-maker','test-tenant-2','other@uat.example','Other maker','MAKER','0'.repeat(64),'0'.repeat(32)).run();
