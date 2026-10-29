@@ -158,9 +158,12 @@ async function api(request,env,db){
   if(path==='/api/assets'&&request.method==='POST'){
     guard(['ADMIN','MAKER'].includes(actor.role),'Hanya Maker atau Admin dapat mencatat agunan.');
     const item=validateAsset(await readBody(request)),id=uuid(),ref=`CM-${new Date().getUTCFullYear()}-${uuid().slice(0,8).toUpperCase()}`;
-    await run(db,`INSERT INTO assets (id,tenant_id,reference_no,borrower,asset_type,address,certificate_type,certificate_no,nib,ownership_name,land_area,building_area,legal_status,notes,created_by)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,id,actor.tenant_id,ref,item.borrower,item.asset_type,item.address,item.certificate_type,item.certificate_no,item.nib,item.ownership_name,item.land_area,item.building_area,item.legal_status,item.notes,actor.id);
-    await audit(db,actor,'ASSET',id,'CREATE',{reference_no:ref});return response({id,reference_no:ref},201);
+    await db.transaction(async tx=>{
+      await run(tx,`INSERT INTO assets (id,tenant_id,reference_no,borrower,asset_type,address,certificate_type,certificate_no,nib,ownership_name,land_area,building_area,legal_status,notes,created_by)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,id,actor.tenant_id,ref,item.borrower,item.asset_type,item.address,item.certificate_type,item.certificate_no,item.nib,item.ownership_name,item.land_area,item.building_area,item.legal_status,item.notes,actor.id);
+      await audit(tx,actor,'ASSET',id,'CREATE',{reference_no:ref});
+    });
+    return response({id,reference_no:ref},201);
   }
   const route=path.match(/^\/api\/assets\/([^/]+)(?:\/(.*))?$/);
   if(route){
