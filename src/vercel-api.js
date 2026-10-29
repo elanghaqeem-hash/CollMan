@@ -178,9 +178,14 @@ async function api(request,env,db){
     if(!sub&&request.method==='PUT'){
       guard(canEditAsset(actor,asset),'Hanya Maker pemilik tugas dapat mengedit Draft atau Returned.');
       const data=validateAsset(await readBody(request));
-      await run(db,`UPDATE assets SET borrower=?,asset_type=?,address=?,certificate_type=?,certificate_no=?,nib=?,ownership_name=?,land_area=?,building_area=?,legal_status=?,notes=?,updated_at=datetime('now')
-        WHERE id=? AND tenant_id=?`,data.borrower,data.asset_type,data.address,data.certificate_type,data.certificate_no,data.nib,data.ownership_name,data.land_area,data.building_area,data.legal_status,data.notes,id,actor.tenant_id);
-      await audit(db,actor,'ASSET',id,'UPDATE');return response({ok:true});
+      await db.transaction(async tx=>{
+        await lockEditableAsset(tx,actor,id);
+        const updated=await run(tx,`UPDATE assets SET borrower=?,asset_type=?,address=?,certificate_type=?,certificate_no=?,nib=?,ownership_name=?,land_area=?,building_area=?,legal_status=?,notes=?,updated_at=datetime('now')
+          WHERE id=? AND tenant_id=? AND status IN ('DRAFT','RETURNED')`,data.borrower,data.asset_type,data.address,data.certificate_type,data.certificate_no,data.nib,data.ownership_name,data.land_area,data.building_area,data.legal_status,data.notes,id,actor.tenant_id);
+        guard(updated.meta.changes===1,'Status agunan berubah.',409);
+        await audit(tx,actor,'ASSET',id,'UPDATE');
+      });
+      return response({ok:true});
     }
     if(sub==='appraisal'&&request.method==='PUT'){
       guard(canEditAsset(actor,asset),'Penilaian hanya dapat diubah pada Draft/Returned oleh Maker.');
