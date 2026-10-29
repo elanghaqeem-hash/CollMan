@@ -137,6 +137,7 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   const raceVal=await call('PUT','/api/assets/'+raceId+'/appraisal',
     {market_value:100000000,base_haircut_pct:10},maker);
   assert.equal(raceVal.status,200);
+  const raceOwner=await db.prepare('SELECT tenant_id FROM users WHERE id=?').bind(userIds.MAKER).first();
   const independentPool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:1});
   const locked=await independentPool.connect();
   try {
@@ -156,11 +157,11 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
     await locked.query(`INSERT INTO workflow_history
       (id,tenant_id,asset_id,action,from_status,to_status,actor_user_id)
       VALUES ($1,$2,$3,'SUBMIT','DRAFT','SUBMITTED',$4)`,
-      [randomUUID(),owner.tenant_id,raceId,userIds.MAKER]);
+      [randomUUID(),raceOwner.tenant_id,raceId,userIds.MAKER]);
     await locked.query(`INSERT INTO audit_log
       (id,tenant_id,entity_type,entity_id,action,actor_user_id)
       VALUES ($1,$2,'ASSET',$3,'SUBMIT',$4)`,
-      [randomUUID(),owner.tenant_id,raceId,userIds.MAKER]);
+      [randomUUID(),raceOwner.tenant_id,raceId,userIds.MAKER]);
     await locked.query('COMMIT');
     const denied=await staleEdit;
     assert.equal(denied.status,409,JSON.stringify(denied.data));
