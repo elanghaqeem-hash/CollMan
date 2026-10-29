@@ -28,7 +28,7 @@ async function login(email,password) {
   assert.equal(r.status,200,JSON.stringify(r.data));assert.ok(r.cookie);return r.cookie;
 }
 const password='StrongPassword123!';
-const assetInfo={...completeAsset('Ruko'),borrower:'Test only / bukan data nasabah'};
+const assetInfo={...completeAsset('Ruko'),borrower:'UAT Test only / bukan data nasabah'};
 
 test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation', {skip:!process.env.DATABASE_URL}, async()=>{
   const h=await call('GET','/api/health');
