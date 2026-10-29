@@ -66,16 +66,19 @@ async function authRoutes(request,env,db,path) {
     const body=await readBody(request);
     guard(env.BOOTSTRAP_TOKEN&&env.BOOTSTRAP_TOKEN.length>=32,'Bootstrap belum dikonfigurasi oleh administrator.',503);
     guard(constantEquals(String(body.setup_token??''),env.BOOTSTRAP_TOKEN),'Token setup salah.',403);
-    const count=await row(db,'SELECT COUNT(*) AS total FROM users');guard(count.total===0,'Sistem telah diinisialisasi.',409);
     const name=required(body.organization,'Nama organisasi',150),email=validEmail(body.email),displayName=required(body.display_name,'Nama administrator',150);
     const password=strongPassword(body.password),salt=bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
     const t=uuid(),u=uuid();
-    await db.batch([
-      db.prepare('INSERT INTO tenants (id,name) VALUES (?,?)').bind(t,name),
-      db.prepare('INSERT INTO users (id,tenant_id,email,display_name,role,password_hash,password_salt) VALUES (?,?,?,?,?,?,?)').bind(u,t,email,displayName,'ADMIN',await hashPassword(password,salt),salt),
-      db.prepare('INSERT INTO tenant_settings (tenant_id,risk_weights_json) VALUES (?,?)').bind(t,'{}'),
-      db.prepare('INSERT INTO audit_log (id,tenant_id,entity_type,entity_id,action,actor_user_id) VALUES (?,?,?,?,?,?)').bind(uuid(),t,'USER',u,'BOOTSTRAP_ADMIN',u)
-    ]);
+    // The advisory lock serializes first-admin creation across independent Vercel instances.
+    await db.transaction(async tx=>{
+      await tx.prepare("SELECT pg_advisory_xact_lock(hashtext('collman_bootstrap'))").first();
+      const existing=await row(tx,'SELECT COUNT(*) AS total FROM users');
+      guard(existing.total===0,'Sistem telah diinisialisasi.',409);
+      await tx.prepare('INSERT INTO tenants (id,name) VALUES (?,?)').bind(t,name).run();
+      await tx.prepare('INSERT INTO users (id,tenant_id,email,display_name,role,password_hash,password_salt) VALUES (?,?,?,?,?,?,?)').bind(u,t,email,displayName,'ADMIN',await hashPassword(password,salt),salt).run();
+      await tx.prepare('INSERT INTO tenant_settings (tenant_id,risk_weights_json) VALUES (?,?)').bind(t,'{}').run();
+      await tx.prepare('INSERT INTO audit_log (id,tenant_id,entity_type,entity_id,action,actor_user_id) VALUES (?,?,?,?,?,?)').bind(uuid(),t,'USER',u,'BOOTSTRAP_ADMIN',u).run();
+    });
     return response({ok:true,message:'Administrator berhasil diinisialisasi. Silakan login.'},201);
   }
   if(path==='/api/auth/login'&&request.method==='POST'){
