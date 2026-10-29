@@ -1,5 +1,8 @@
 /** Vercel runtime adapter of the Cloudflare business API. Cloudflare source remains untouched. */
-import {ROLES, RISK_FLAGS, STATUS_LABELS, ACTIONS, validateAsset, calculateValuation, nextWorkflow, numberIn, required, optional, problem} from './domain.js';
+import {ROLES, RISK_FLAGS, STATUS_LABELS, ACTIONS, nextWorkflow, numberIn, required, optional, problem} from './domain.js';
+
+import {catalogTypes,GROUPS,POLICIES} from '../public/collateral-catalog.js';
+import {validateCollateralAsset as validateAsset,validateCatalog,submissionIssues,calculateCollateralValuation,validateEligibility,validDate} from './collateral.js';
 
 const COOKIE = 'collman_session';
 const JSON_HEADERS = {'content-type':'application/json; charset=utf-8','cache-control':'no-store'};
@@ -48,6 +51,11 @@ async function audit(db,actor,entityType,entityId,action,detail={}) {
 async function tenantWeights(db,tenantId){
   const r=await row(db,'SELECT risk_weights_json FROM tenant_settings WHERE tenant_id=?',tenantId);
   try{return JSON.parse(r?.risk_weights_json||'{}');}catch{return {};}
+}
+async function tenantCatalog(db,tenantId){
+  const settings=await row(db,'SELECT collateral_catalog_json FROM tenant_settings WHERE tenant_id=?',tenantId);
+  const config=settings?.collateral_catalog_json||{};
+  return {config,types:catalogTypes(config)};
 }
 async function fetchAsset(db,actor,id){
   const asset=await row(db,'SELECT a.*,u.display_name AS maker_name FROM assets a JOIN users u ON u.id=a.created_by WHERE a.id=? AND a.tenant_id=?',id,actor.tenant_id);
@@ -141,30 +149,53 @@ async function api(request,env,db){
   }
   if(path==='/api/dashboard'&&request.method==='GET'){
     const stats=await all(db,`SELECT status,COUNT(*) AS total FROM assets WHERE tenant_id=? GROUP BY status`,actor.tenant_id);
-    const assets=await row(db,`SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN a.status='APPROVED' THEN p.market_value ELSE 0 END),0) AS approved_market,
-      COALESCE(SUM(CASE WHEN a.status='APPROVED' THEN p.liquidation_value ELSE 0 END),0) AS approved_liquidation
+    const assets=await row(db,`SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN a.status='APPROVED' AND a.collateral_kind='ASSET' THEN p.market_value ELSE 0 END),0) AS approved_market,
+      COALESCE(SUM(CASE WHEN a.status='APPROVED' AND a.collateral_kind='ASSET' THEN p.liquidation_value ELSE 0 END),0) AS approved_liquidation
       FROM assets a LEFT JOIN appraisals p ON p.asset_id=a.id AND p.tenant_id=a.tenant_id WHERE a.tenant_id=?`,actor.tenant_id);
     const recent=await all(db,`SELECT a.id,a.reference_no,a.borrower,a.asset_type,a.status,a.updated_at,p.market_value,p.liquidation_value
       FROM assets a LEFT JOIN appraisals p ON p.asset_id=a.id AND p.tenant_id=a.tenant_id WHERE a.tenant_id=? ORDER BY a.updated_at DESC LIMIT 8`,actor.tenant_id);
-    return response({assets,statuses:stats,recent});
+    const categories=await all(db,`SELECT a.category_code,a.collateral_kind,COUNT(*) AS total,
+      COALESCE(SUM(CASE WHEN a.status='APPROVED' THEN p.liquidation_value ELSE 0 END),0) AS approved_value
+      FROM assets a LEFT JOIN appraisals p ON p.asset_id=a.id AND p.tenant_id=a.tenant_id WHERE a.tenant_id=? GROUP BY a.category_code,a.collateral_kind`,actor.tenant_id);
+    return response({assets,statuses:stats,recent,categories});
+  }
+  if(path==='/api/collateral-catalog'&&request.method==='GET'){
+    const catalog=await tenantCatalog(db,actor.tenant_id);
+    return response({...catalog,groups:GROUPS,policies:POLICIES});
+  }
+  if(path==='/api/collateral-catalog'&&request.method==='PUT'){
+    guard(actor.role==='ADMIN','Hanya Admin dapat mengubah katalog.');
+    const config=validateCatalog(await readBody(request));
+    await db.transaction(async tx=>{
+      const existing=await row(tx,'SELECT collateral_catalog_json FROM tenant_settings WHERE tenant_id=? FOR UPDATE',actor.tenant_id);
+      for(const old of existing?.collateral_catalog_json?.custom_types||[]){
+        const updated=config.custom_types.find(t=>t.code===old.code);
+        guard(updated&&updated.name===old.name&&updated.group===old.group,'Jenis tambahan yang tersimpan harus dipertahankan. Nonaktifkan melalui kebijakan.',409);
+      }
+      await run(tx,"UPDATE tenant_settings SET collateral_catalog_json=?,updated_at=datetime('now') WHERE tenant_id=?",JSON.stringify(config),actor.tenant_id);
+      await audit(tx,actor,'CATALOG',actor.tenant_id,'UPDATE_COLLATERAL_CATALOG',config);
+    });
+    return response({ok:true,types:catalogTypes(config)});
   }
   if(path==='/api/assets'&&request.method==='GET'){
     const search=(url.searchParams.get('q')||'').slice(0,80),status=url.searchParams.get('status')||'';
     const offset=numberIn(url.searchParams.get('offset')||0,0,1000000,'offset');
     guard(!status||Object.keys(STATUS_LABELS).includes(status),'Filter status tidak valid.');
-    const where=`a.tenant_id=? AND (?='' OR a.borrower LIKE ? OR a.reference_no LIKE ? OR a.address LIKE ?) AND (?='' OR a.status=?)`;
-    const args=[actor.tenant_id,search,`%${search}%`,`%${search}%`,`%${search}%`,status,status];
+    const category=url.searchParams.get('category')||'';guard(!category||GROUPS.some(g=>g.code===category),'Kategori tidak dikenal.');
+    const where=`a.tenant_id=? AND (?='' OR a.borrower LIKE ? OR a.reference_no LIKE ? OR a.address LIKE ?) AND (?='' OR a.status=?) AND (?='' OR a.category_code=?)`;
+    const args=[actor.tenant_id,search,`%${search}%`,`%${search}%`,`%${search}%`,status,status,category,category];
     const count=await row(db,`SELECT COUNT(*) AS total FROM assets a WHERE ${where}`,...args);
-    const records=await all(db,`SELECT a.id,a.reference_no,a.borrower,a.asset_type,a.address,a.status,a.legal_status,a.updated_at,a.created_by,p.market_value,p.liquidation_value
+    const records=await all(db,`SELECT a.id,a.reference_no,a.borrower,a.asset_type,a.address,a.status,a.legal_status,a.category_code,a.collateral_kind,a.eligibility_status,a.updated_at,a.created_by,p.market_value,p.liquidation_value
       FROM assets a LEFT JOIN appraisals p ON p.asset_id=a.id AND p.tenant_id=a.tenant_id WHERE ${where} ORDER BY a.updated_at DESC LIMIT 50 OFFSET ?`,...args,offset);
     return response({records,total:count.total,offset});
   }
   if(path==='/api/assets'&&request.method==='POST'){
     guard(['ADMIN','MAKER'].includes(actor.role),'Hanya Maker atau Admin dapat mencatat agunan.');
-    const item=validateAsset(await readBody(request)),id=uuid(),ref=`CM-${new Date().getUTCFullYear()}-${uuid().slice(0,8).toUpperCase()}`;
+    const input=await readBody(request),id=uuid(),ref=`CM-${new Date().getUTCFullYear()}-${uuid().slice(0,8).toUpperCase()}`;
     await db.transaction(async tx=>{
-      await run(tx,`INSERT INTO assets (id,tenant_id,reference_no,borrower,asset_type,address,certificate_type,certificate_no,nib,ownership_name,land_area,building_area,legal_status,notes,created_by)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,id,actor.tenant_id,ref,item.borrower,item.asset_type,item.address,item.certificate_type,item.certificate_no,item.nib,item.ownership_name,item.land_area,item.building_area,item.legal_status,item.notes,actor.id);
+      const item=validateAsset(input,(await tenantCatalog(tx,actor.tenant_id)).types);
+      await run(tx,`INSERT INTO assets (id,tenant_id,reference_no,borrower,asset_type,address,certificate_type,certificate_no,nib,ownership_name,land_area,building_area,legal_status,notes,created_by,currency_code,category_code,collateral_kind,collateral_details,document_checklist,security_type,security_status,security_reference)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,id,actor.tenant_id,ref,item.borrower,item.asset_type,item.address,item.certificate_type,item.certificate_no,item.nib,item.ownership_name,item.land_area,item.building_area,item.legal_status,item.notes,actor.id,item.currency_code,item.category_code,item.collateral_kind,JSON.stringify(item.collateral_details),JSON.stringify(item.document_checklist),item.security_type,item.security_status,item.security_reference);
       await audit(tx,actor,'ASSET',id,'CREATE',{reference_no:ref});
     });
     return response({id,reference_no:ref},201);
@@ -181,11 +212,18 @@ async function api(request,env,db){
     }
     if(!sub&&request.method==='PUT'){
       guard(canEditAsset(actor,asset),'Hanya Maker pemilik tugas dapat mengedit Draft atau Returned.');
-      const data=validateAsset(await readBody(request));
+      const input=await readBody(request);
       await db.transaction(async tx=>{
         await lockEditableAsset(tx,actor,id);
-        const updated=await run(tx,`UPDATE assets SET borrower=?,asset_type=?,address=?,certificate_type=?,certificate_no=?,nib=?,ownership_name=?,land_area=?,building_area=?,legal_status=?,notes=?,updated_at=datetime('now')
-          WHERE id=? AND tenant_id=? AND status IN ('DRAFT','RETURNED')`,data.borrower,data.asset_type,data.address,data.certificate_type,data.certificate_no,data.nib,data.ownership_name,data.land_area,data.building_area,data.legal_status,data.notes,id,actor.tenant_id);
+        const before=await fetchAsset(tx,actor,id);
+        const data=validateAsset(input,(await tenantCatalog(tx,actor.tenant_id)).types);
+        // Any revision invalidates eligibility. Changes to valuation inputs invalidate prior valuation.
+        if(before.asset_type!==data.asset_type||before.currency_code!==data.currency_code||JSON.stringify(Object.entries(before.collateral_details).sort())!==JSON.stringify(Object.entries(data.collateral_details).sort())){
+          await run(tx,'DELETE FROM appraisals WHERE asset_id=? AND tenant_id=?',id,actor.tenant_id);
+          await audit(tx,actor,'APPRAISAL',id,'INVALIDATE_ASSET_CHANGE',{previous_type:before.asset_type,next_type:data.asset_type});
+        }
+        const updated=await run(tx,`UPDATE assets SET borrower=?,asset_type=?,address=?,certificate_type=?,certificate_no=?,nib=?,ownership_name=?,land_area=?,building_area=?,legal_status=?,notes=?,currency_code=?,category_code=?,collateral_kind=?,collateral_details=?,document_checklist=?,security_type=?,security_status=?,security_reference=?,eligibility_status='PENDING',eligibility_notes='',updated_at=datetime('now')
+          WHERE id=? AND tenant_id=? AND status IN ('DRAFT','RETURNED')`,data.borrower,data.asset_type,data.address,data.certificate_type,data.certificate_no,data.nib,data.ownership_name,data.land_area,data.building_area,data.legal_status,data.notes,data.currency_code,data.category_code,data.collateral_kind,JSON.stringify(data.collateral_details),JSON.stringify(data.document_checklist),data.security_type,data.security_status,data.security_reference,id,actor.tenant_id);
         guard(updated.meta.changes===1,'Status agunan berubah.',409);
         await audit(tx,actor,'ASSET',id,'UPDATE');
       });
@@ -193,17 +231,20 @@ async function api(request,env,db){
     }
     if(sub==='appraisal'&&request.method==='PUT'){
       guard(canEditAsset(actor,asset),'Penilaian hanya dapat diubah pada Draft/Returned oleh Maker.');
-      const data=await readBody(request),weights=await tenantWeights(db,actor.tenant_id);
-      const calc=calculateValuation(data,weights);
-      const notes=safeNote(data.notes),date=/^\d{4}-\d{2}-\d{2}$/.test(data.valuation_date||'')?data.valuation_date:new Date().toISOString().slice(0,10);
+      const data=await readBody(request);
+      const notes=safeNote(data.notes),date=validDate(data.valuation_date||new Date().toISOString().slice(0,10),'Tanggal penilaian');
+      let calc;
       await db.transaction(async tx=>{
         await lockEditableAsset(tx,actor,id);
-        await run(tx,`INSERT INTO appraisals (id,tenant_id,asset_id,market_value,base_haircut_pct,risk_haircut_pct,total_haircut_pct,liquidation_value,risk_flags_json,valuation_date,notes,updated_by)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(asset_id) DO UPDATE SET market_value=excluded.market_value,base_haircut_pct=excluded.base_haircut_pct,
+        const current=await fetchAsset(tx,actor,id);
+        calc=calculateCollateralValuation(data,current,(await tenantCatalog(tx,actor.tenant_id)).types,await tenantWeights(tx,actor.tenant_id));
+        await run(tx,`INSERT INTO appraisals (id,tenant_id,asset_id,market_value,base_haircut_pct,risk_haircut_pct,total_haircut_pct,liquidation_value,risk_flags_json,valuation_date,notes,updated_by,valuation_method,valuation_inputs,valuation_reference)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(asset_id) DO UPDATE SET market_value=excluded.market_value,base_haircut_pct=excluded.base_haircut_pct,
       risk_haircut_pct=excluded.risk_haircut_pct,total_haircut_pct=excluded.total_haircut_pct,liquidation_value=excluded.liquidation_value,
+      valuation_method=excluded.valuation_method,valuation_inputs=excluded.valuation_inputs,valuation_reference=excluded.valuation_reference,
       risk_flags_json=excluded.risk_flags_json,valuation_date=excluded.valuation_date,notes=excluded.notes,updated_by=excluded.updated_by,updated_at=datetime('now')`,
-      uuid(),actor.tenant_id,id,calc.market_value,calc.base_haircut_pct,calc.risk_haircut_pct,calc.total_haircut_pct,calc.liquidation_value,JSON.stringify(calc.risk_flags),date,notes,actor.id);
-        await run(tx,'UPDATE assets SET updated_at=datetime(\'now\') WHERE id=? AND tenant_id=?',id,actor.tenant_id);
+      uuid(),actor.tenant_id,id,calc.market_value,calc.base_haircut_pct,calc.risk_haircut_pct,calc.total_haircut_pct,calc.liquidation_value,JSON.stringify(calc.risk_flags),date,notes,actor.id,calc.valuation_method,JSON.stringify(calc.valuation_inputs),calc.valuation_reference);
+        await run(tx,'UPDATE assets SET eligibility_status=\'PENDING\',eligibility_notes=\'\',updated_at=datetime(\'now\') WHERE id=? AND tenant_id=?',id,actor.tenant_id);
         await audit(tx,actor,'APPRAISAL',id,'UPSERT',{market_value:calc.market_value,total_haircut_pct:calc.total_haircut_pct,liquidation_value:calc.liquidation_value});
       });
       return response({ok:true,calculation:calc});
@@ -235,17 +276,32 @@ async function api(request,env,db){
       });
       return response({ok:true});
     }
+    if(sub==='eligibility'&&request.method==='PUT'){
+      guard(['ADMIN','CHECKER','REVIEWER','APPROVER'].includes(actor.role)&&actor.id!==asset.created_by,'Kajian bank harus dilakukan pejabat berbeda dari Maker.');
+      const decision=validateEligibility(await readBody(request));
+      await db.transaction(async tx=>{
+        const current=await row(tx,'SELECT status FROM assets WHERE id=? AND tenant_id=? FOR UPDATE',id,actor.tenant_id);
+        guard(['SUBMITTED','REVIEWED','RECOMMENDED'].includes(current?.status),'Kajian hanya tersedia saat proses review.',409);
+        await run(tx,"UPDATE assets SET eligibility_status=?,eligibility_notes=?,updated_at=datetime('now') WHERE id=? AND tenant_id=?",decision.eligibility_status,decision.eligibility_notes,id,actor.tenant_id);
+        await audit(tx,actor,'ASSET',id,'ASSESS_ELIGIBILITY',decision);
+      });
+      return response({ok:true});
+    }
     if(sub==='transition'&&request.method==='POST'){
       const data=await readBody(request),action=required(data.action,'Aksi workflow',50),note=safeNote(data.note);
       const next=nextWorkflow(action,asset.status,actor.role,asset.created_by,actor.id);
-      if(action==='SUBMIT'){
-        guard((actor.role==='ADMIN'||asset.created_by===actor.id),'Hanya Maker pemilik tugas dapat mengirim agunan.');
-        guard(asset.legal_status!=='BELUM_DIVERIFIKASI','Status legalitas harus diperiksa sebelum submit.');
-        const val=await row(db,'SELECT market_value FROM appraisals WHERE tenant_id=? AND asset_id=?',actor.tenant_id,id);
-        guard(val&&val.market_value>0,'Nilai pasar harus diisi sebelum submit.');
-      }
       if(action==='RETURN'||action==='REJECT')guard(note.length>=5,'Alasan minimal 5 karakter diperlukan.');
       await db.transaction(async tx=>{
+        const locked=await row(tx,'SELECT * FROM assets WHERE id=? AND tenant_id=? FOR UPDATE',id,actor.tenant_id);
+        guard(locked&&locked.status===asset.status,'Status berubah. Muat ulang dan coba kembali.',409);
+        if(action==='SUBMIT'||action==='APPROVE'){
+          if(action==='SUBMIT')guard(actor.role==='ADMIN'||locked.created_by===actor.id,'Hanya pemilik tugas dapat mengirim agunan.');
+          const issues=submissionIssues(locked,(await tenantCatalog(tx,actor.tenant_id)).types);
+          guard(issues.length===0,issues.join(' '),400);
+          const val=await row(tx,'SELECT market_value FROM appraisals WHERE tenant_id=? AND asset_id=?',actor.tenant_id,id);
+          guard(val&&val.market_value>0,'Nilai penilaian harus diisi sebelum submit / persetujuan.',400);
+          if(action==='APPROVE')guard(locked.eligibility_status==='ELIGIBLE'&&locked.security_status==='PERFECTED','Kajian bank harus memenuhi kebijakan dan pengikatan harus selesai.',400);
+        }
         const update=await tx.prepare(`UPDATE assets SET status=?,updated_at=datetime('now') WHERE id=? AND tenant_id=? AND status=?`).bind(next,id,actor.tenant_id,asset.status).run();
         guard(update.meta.changes===1,'Status berubah. Muat ulang dan coba kembali.',409);
         await tx.prepare('INSERT INTO workflow_history (id,tenant_id,asset_id,action,from_status,to_status,note,actor_user_id) VALUES (?,?,?,?,?,?,?,?)').bind(uuid(),actor.tenant_id,id,action,asset.status,next,note,actor.id).run();

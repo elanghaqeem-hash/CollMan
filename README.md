@@ -1,5 +1,12 @@
 # CollMan — Collateral Management System
 
+## Current PostgreSQL extension — 30 October 2026
+
+The active PostgreSQL application now has **16 collateral categories and 74 initial types**, category-specific data/evidence/security forms, eight valuation methods, independent bank eligibility review, separate guarantee reporting, and Admin-configurable additional subtypes and acceptance policies. It preserves existing property records. This source change does **not** by itself confirm a live deployment or database migration.
+
+See [Universal Collateral Release](docs/UNIVERSAL_COLLATERAL_RELEASE.md) for migration/release order and scope, and [Implementation Traceability](docs/IMPLEMENTATION_TRACEABILITY.md) for checks. The historical Cloudflare foundation notes below are retained for context; deploy this change using the existing Vercel/PostgreSQL branch rather than the legacy pilot.
+
+
 An operational **initial release (v0.1.0)** for registration, preliminary appraisal, review and approval of collateral objects. Built for **Cloudflare Workers Free + SQLite-backed Durable Objects**, with a zero-dependency web UI. No applicant records, appraisal templates containing personal information, or bank policy weights are included in the public source repository.
 
 > **Scope boundary:** This is a working foundation, not a certified valuation engine or completed implementation of the KB Bank CIIS BRD. No ATR/BPN, spatial-risk data provider, AI model, SLIK, mapping, KJPP, OCR, upload storage, or regulatory system is connected. The preliminary figures are **user-provided and parameterized**. The final bank credit decision must remain with authorized people.

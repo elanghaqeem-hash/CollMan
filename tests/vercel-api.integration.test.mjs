@@ -1,3 +1,4 @@
+import {completeAsset,valuationInput} from './collateral-fixtures.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
@@ -27,7 +28,7 @@ async function login(email,password) {
   assert.equal(r.status,200,JSON.stringify(r.data));assert.ok(r.cookie);return r.cookie;
 }
 const password='StrongPassword123!';
-const assetInfo={borrower:'Test only / bukan data nasabah',asset_type:'Ruko',address:'Jalan UAT No 1',land_area:120,building_area:180,legal_status:'SESUAI'};
+const assetInfo={...completeAsset('Ruko'),borrower:'Test only / bukan data nasabah'};
 
 test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation', {skip:!process.env.DATABASE_URL}, async()=>{
   const h=await call('GET','/api/health');
@@ -69,7 +70,7 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   assert.equal(setting.status,200);
   assert.equal((await call('GET','/api/settings',undefined,maker)).data.risk_weights.banjir,5);
   assert.equal((await call('PUT','/api/settings',{risk_weights:{banjir:99}},maker)).status,403);
-  const appr=await call('PUT','/api/assets/'+id+'/appraisal',{market_value:1000000000,base_haircut_pct:20,risk_flags:{banjir:true},valuation_date:'2026-10-29'},maker);
+  const appr=await call('PUT','/api/assets/'+id+'/appraisal',valuationInput('MANUAL_MARKET',{valuation_inputs:{amount:1000000000},base_haircut_pct:20,risk_flags:{banjir:true},valuation_date:'2026-10-29'}),maker);
   assert.equal(appr.status,200,JSON.stringify(appr.data));
   assert.equal(appr.data.calculation.liquidation_value,750000000);
   const comp=await call('POST','/api/assets/'+id+'/comparables',{description:'UAT comparable',source_url:'https://example.com',offering_price:1200000000},maker);
@@ -81,6 +82,7 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   assert.equal((await call('GET','/api/assets/'+id,undefined,checker)).data.comparables.length,1);
   assert.equal((await call('POST','/api/assets/'+id+'/transition',{action:'APPROVE'},maker)).status,403);
   for(const [cookie,action,want] of [[maker,'SUBMIT','SUBMITTED'],[checker,'CHECK','REVIEWED'],[reviewer,'RECOMMEND','RECOMMENDED'],[approver,'APPROVE','APPROVED']]){
+    if(action==='APPROVE')assert.equal((await call('PUT','/api/assets/'+id+'/eligibility',{eligibility_status:'ELIGIBLE',eligibility_notes:'Policy reviewed by checker'},checker)).status,200);
     const r=await call('POST','/api/assets/'+id+'/transition',{action},cookie);
     assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.status,want);
   }
@@ -97,7 +99,7 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   const second=await call('POST','/api/assets',assetInfo,maker);
   assert.equal(second.status,201);
   const secondId=second.data.id;
-  assert.equal((await call('PUT','/api/assets/'+secondId+'/appraisal',{market_value:100000,base_haircut_pct:15},maker)).status,200);
+  assert.equal((await call('PUT','/api/assets/'+secondId+'/appraisal',valuationInput('MANUAL_MARKET',{valuation_inputs:{amount:100000},base_haircut_pct:15}),maker)).status,200);
   assert.equal((await call('POST','/api/assets/'+secondId+'/transition',{action:'SUBMIT'},maker)).status,200);
   assert.equal((await call('POST','/api/assets/'+secondId+'/transition',{action:'RETURN',note:'Need correction'},checker)).status,200);
   assert.equal((await call('POST','/api/assets/'+secondId+'/transition',{action:'SUBMIT'},maker)).status,200);
@@ -135,7 +137,7 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   assert.equal(raceCreated.status,201);
   const raceId=raceCreated.data.id;
   const raceVal=await call('PUT','/api/assets/'+raceId+'/appraisal',
-    {market_value:100000000,base_haircut_pct:10},maker);
+    valuationInput('MANUAL_MARKET',{valuation_inputs:{amount:100000000},base_haircut_pct:10}),maker);
   assert.equal(raceVal.status,200);
   const raceOwner=await db.prepare('SELECT tenant_id FROM users WHERE id=?').bind(userIds.MAKER).first();
   const independentPool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:1});
