@@ -100,10 +100,12 @@ async function authRoutes(request,env,db,path) {
         window_start=CASE WHEN login_attempts.window_start<datetime('now','-15 minutes') THEN datetime('now') ELSE login_attempts.window_start END`,attemptKey);
       throw problem('Email atau password salah.',401);
     }
-    await run(db,'DELETE FROM login_attempts WHERE identifier_hash=?',attemptKey);
     const token=bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
-    await run(db,`INSERT INTO sessions(token_hash,user_id,expires_at) VALUES (?,?,datetime('now','+12 hours'))`,await sha256(token),user.id);
-    await audit(db,user,'USER',user.id,'LOGIN');
+    await db.transaction(async tx=>{
+      await run(tx,'DELETE FROM login_attempts WHERE identifier_hash=?',attemptKey);
+      await run(tx,`INSERT INTO sessions(token_hash,user_id,expires_at) VALUES (?,?,datetime('now','+12 hours'))`,await sha256(token),user.id);
+      await audit(tx,user,'USER',user.id,'LOGIN');
+    });
     return response({ok:true},200,{'set-cookie':sessionCookie(token,request)});
   }
   if(path==='/api/auth/logout'&&request.method==='POST'){
