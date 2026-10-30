@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {GROUPS,BUILTIN_TYPES,catalogTypes} from '../public/collateral-catalog.js';
 import {validateCollateralAsset,validateCatalog,submissionIssues,calculateCollateralValuation,validDate} from '../src/collateral.js';
 import {completeAsset,valuationInput} from './collateral-fixtures.mjs';
+import {findCollateralTypes,universalAssetForm,typeOptions} from '../public/collateral-ui.js';
 
 test('every built-in type round trips, has a usable form schema and only applicable valuation methods',()=>{
  assert.equal(GROUPS.length,16);assert.ok(BUILTIN_TYPES.length>70);
@@ -45,4 +46,24 @@ test('tenant-specific additional types inherit category and cannot spoof kind, s
 test('non-property objects have no artificial land or building area; guarantees remain distinct',()=>{
  const a=validateCollateralAsset({...completeAsset('Corporate Guarantee'),land_area:500});assert.equal(a.land_area,0);assert.equal(a.collateral_kind,'GUARANTEE');
  const property=validateCollateralAsset({borrower:'Historic',asset_type:'Ruko',address:'A',certificate_no:'ABC',certificate_type:'SHM',land_area:120});assert.equal(property.collateral_details.title_no,'ABC');assert.equal(property.land_area,120);
+});
+
+test('searchable collateral picker covers 16 categories without offering blocked types',()=>{
+ assert.equal(GROUPS.length,16);
+ const html=universalAssetForm({},BUILTIN_TYPES);
+ assert.match(html,/id="asset-type-search"/);
+ assert.match(html,/id="asset-type-results"/);
+ for(const name of ['Tanah Kosong','Deposito','Emas Batangan','Mobil','Invoice','Resi Gudang','Personal Guarantee','Pesawat Udara']){
+  const result=findCollateralTypes(BUILTIN_TYPES,name);
+  assert.ok(result.some(x=>x.name===name),name);
+ }
+ assert.ok(findCollateralTypes(BUILTIN_TYPES,'surat berharga').some(x=>x.name==='Saham'));
+ assert.deepEqual(findCollateralTypes(BUILTIN_TYPES,'a'),[]);
+ const disabled=BUILTIN_TYPES.map(x=>x.name==='Mobil'?{...x,enabled:false}:x);
+ assert.ok(!findCollateralTypes(disabled,'mobil').some(x=>x.name==='Mobil'));
+ const blocked=BUILTIN_TYPES.map(x=>x.name==='Deposito'?{...x,policy:'BLOCKED'}:x);
+ assert.ok(!findCollateralTypes(blocked,'deposito').some(x=>x.name==='Deposito'));
+ const property=typeOptions(BUILTIN_TYPES,'','PROPERTY');
+ assert.match(property,/Tanah Kosong/);
+ assert.doesNotMatch(property,/Deposito/);
 });

@@ -1,5 +1,5 @@
 import {GROUPS,METHODS,BUILTIN_TYPES} from './collateral-catalog.js';
-import {universalAssetForm,readAssetForm,changeAssetType,collateralDetail,eligibilityForm,universalAppraisalForm,valuationInputs,catalogView} from './collateral-ui.js';
+import {universalAssetForm,readAssetForm,changeAssetType,findCollateralTypes,collateralDetail,eligibilityForm,universalAppraisalForm,valuationInputs,catalogView} from './collateral-ui.js';
 import {escapeText, currency, riskLabels, statusText, actionText} from './helpers.js';
 import {requestApi as api,validateMetadata} from './api-client.js';
 const app=document.getElementById('app');
@@ -125,8 +125,26 @@ async function onSubmit(event){const form=event.target;if(!form.id)return;event.
   }
  }catch(e){notify(e.message,true);}finally{if(b)b.disabled=false;}}
 async function navigate(view){state.mobile=false;state.view=view;state.edit=false;if(view==='assetform'){renderShell();return;}await loadView();}
+function renderCollateralSearch(input){
+ const results=document.getElementById('asset-type-results');if(!results)return;
+ const term=input.value.trim();if(term.length<2){results.hidden=true;results.innerHTML='';return;}
+ const found=findCollateralTypes(state.catalog?.types||BUILTIN_TYPES,term);
+ results.innerHTML=found.length?found.map(t=>'<button class="asset-search-option" type="button" data-search-type="'+esc(t.code)+'"><strong>'+esc(t.name)+'</strong><span>'+esc(GROUPS.find(g=>g.code===t.group)?.name||'')+'</span></button>').join(''):'<p class="small muted asset-search-empty">Tidak ada jenis agunan aktif yang cocok. Ubah kata kunci atau pilih kategori lain.</p>';
+ results.hidden=false;
+}
 async function onClick(event){const nav=event.target.closest('[data-nav]');if(nav){await navigate(nav.dataset.nav);return;}
  const open=event.target.closest('[data-open]');if(open){state.detail={asset:{id:open.dataset.open}};await navigate('asset');return;}
+ const selectedType=event.target.closest('[data-search-type]');
+ if(selectedType){
+  const type=(state.catalog?.types||BUILTIN_TYPES).find(t=>t.code===selectedType.dataset.searchType&&t.enabled&&t.policy!=='BLOCKED');
+  const form=document.getElementById('asset-form');if(!form||!type)return;
+  document.getElementById('category-select').value=type.group;
+  changeAssetType(form,state.catalog?.types||BUILTIN_TYPES,true);
+  form.elements.asset_type.value=type.name;
+  const search=document.getElementById('asset-type-search'),results=document.getElementById('asset-type-results');
+  if(search)search.value='';if(results){results.hidden=true;results.innerHTML='';}
+  form.elements.asset_type.focus();return;
+ }
  const action=event.target.closest('[data-action]')?.dataset.action;
  if(action){
   if(action==='retry-connection'){const button=event.target.closest('button');if(button)button.disabled=true;await init();return;}
@@ -157,4 +175,5 @@ document.addEventListener('change',event=>{
  if(form?.id==='appraisal-form'&&event.target.name==='valuation_method')document.getElementById('valuation-inputs').innerHTML=valuationInputs(event.target.value,{},state.detail.asset.currency_code||'IDR');
  if(form?.id==='catalog-policy-form'&&event.target.name==='code'){const type=state.catalog.types.find(t=>t.code===event.target.value);form.elements.policy.value=type.policy;form.elements.enabled.checked=type.enabled;}
 });
+document.addEventListener('input',event=>{if(event.target.id==='asset-type-search')renderCollateralSearch(event.target);});
 document.addEventListener('submit',onSubmit);document.addEventListener('click',onClick);init();
