@@ -6,6 +6,7 @@ import {validateCollateralAsset as validateAsset,validateCatalog,submissionIssue
 import {integrationReadiness,analyzeComparableOffers,screenSpatialEvidence,normalizeOcrReview} from './integrations.js';
 import {validateEvidenceInput,validateEvidenceReview,mayReviewEvidence} from './evidence.js';
 import {enterpriseRoutes} from './enterprise-api.js';
+import {taskRoutes,moveTaskAfterWorkflow} from './task-service.js';
 import {numeric} from './valuation-engine.js';
 
 
@@ -158,6 +159,10 @@ async function api(request,env,db){
     guard(['ADMIN','AUDITOR'].includes(actor.role),'Hanya Admin dan Auditor dapat melihat status integrasi.');
     return response({connectors:integrationReadiness(env),notice:'Status konfigurasi bukan bukti koneksi. ATR/BPN, OCR, AI dan GIS memerlukan kontrak provider, persetujuan pemrosesan data dan UAT langsung.'});
   }
+  if(path.startsWith('/api/tasks')){
+    const routeResult=await taskRoutes(request,db,actor,path,url);
+    if(routeResult)return routeResult;
+  }
   if(path==='/api/dashboard'&&request.method==='GET'){
     const stats=await all(db,`SELECT status,COUNT(*) AS total FROM assets WHERE tenant_id=? GROUP BY status`,actor.tenant_id);
     const assets=await row(db,`SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN a.status='APPROVED' AND a.collateral_kind='ASSET' THEN p.market_value ELSE 0 END),0) AS approved_market,
@@ -207,6 +212,7 @@ async function api(request,env,db){
       const item=validateAsset(input,(await tenantCatalog(tx,actor.tenant_id)).types);
       await run(tx,`INSERT INTO assets (id,tenant_id,reference_no,borrower,asset_type,address,certificate_type,certificate_no,nib,ownership_name,land_area,building_area,legal_status,notes,created_by,currency_code,category_code,collateral_kind,collateral_details,document_checklist,security_type,security_status,security_reference)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,id,actor.tenant_id,ref,item.borrower,item.asset_type,item.address,item.certificate_type,item.certificate_no,item.nib,item.ownership_name,item.land_area,item.building_area,item.legal_status,item.notes,actor.id,item.currency_code,item.category_code,item.collateral_kind,JSON.stringify(item.collateral_details),JSON.stringify(item.document_checklist),item.security_type,item.security_status,item.security_reference);
+      await moveTaskAfterWorkflow(tx,actor,id,'DRAFT');
       await audit(tx,actor,'ASSET',id,'CREATE',{reference_no:ref});
     });
     return response({id,reference_no:ref},201);
@@ -395,6 +401,7 @@ async function api(request,env,db){
 
         const update=await tx.prepare(`UPDATE assets SET status=?,updated_at=datetime('now') WHERE id=? AND tenant_id=? AND status=?`).bind(next,id,actor.tenant_id,asset.status).run();
         guard(update.meta.changes===1,'Status berubah. Muat ulang dan coba kembali.',409);
+        await moveTaskAfterWorkflow(tx,actor,id,next);
         await tx.prepare('INSERT INTO workflow_history (id,tenant_id,asset_id,action,from_status,to_status,note,actor_user_id) VALUES (?,?,?,?,?,?,?,?)').bind(uuid(),actor.tenant_id,id,action,asset.status,next,note,actor.id).run();
         await tx.prepare('INSERT INTO audit_log (id,tenant_id,entity_type,entity_id,action,actor_user_id,detail_json) VALUES (?,?,?,?,?,?,?)').bind(uuid(),actor.tenant_id,'ASSET',id,action,actor.id,JSON.stringify({from:asset.status,to:next,note})).run();
       });
