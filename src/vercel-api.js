@@ -306,9 +306,13 @@ async function api(request,env,db){
         guard(val&&val.market_value>0,'Nilai pasar harus diisi sebelum submit.');
       }
       if(action==='APPROVE'){
-        const exceptions=await row(db,`SELECT COUNT(*) AS total FROM asset_evidence WHERE tenant_id=? AND asset_id=?
-          AND review_status<>'REVIEWED_INTERNAL'`,actor.tenant_id,id);
-        guard(Number(exceptions.total)===0,'Persetujuan ditahan: masih ada bukti pending atau disputed.');
+        const openEvidence=await row(db,`SELECT
+          COALESCE(SUM(CASE WHEN review_status='PENDING_REVIEW' THEN 1 ELSE 0 END),0) AS pending,
+          COALESCE(SUM(CASE WHEN review_status='DISPUTED' THEN 1 ELSE 0 END),0) AS disputed
+          FROM asset_evidence WHERE tenant_id=? AND asset_id=?`,actor.tenant_id,id);
+        guard(Number(openEvidence.pending)===0,'Persetujuan ditahan: seluruh bukti tercatat harus direview.');
+        if(Number(openEvidence.disputed)>0)guard(note.length>=20,
+          'Bukti disputed memerlukan alasan pengecualian dari Approver minimal 20 karakter.');
       }
       if(action==='RETURN'||action==='REJECT')guard(note.length>=5,'Alasan minimal 5 karakter diperlukan.');
       await db.transaction(async tx=>{
