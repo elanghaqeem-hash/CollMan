@@ -6,10 +6,10 @@ import {fileURLToPath} from 'node:url';
 import {getPostgres} from '../src/postgres.js';
 
 const requiredTables=['tenants','users','sessions','tenant_settings','assets','appraisals',
-  'comparables','workflow_history','audit_log','login_attempts','schema_migrations'];
+  'comparables','workflow_history','audit_log','login_attempts','asset_evidence','schema_migrations'];
 const requiredConstraints=['fk_asset_creator_tenant','fk_appraisal_asset_tenant',
   'fk_appraisal_editor_tenant','fk_comparable_asset_tenant','fk_comparable_creator_tenant',
-  'fk_workflow_asset_tenant','fk_workflow_actor_tenant','fk_audit_actor_tenant'];
+  'fk_workflow_asset_tenant','fk_workflow_actor_tenant','fk_audit_actor_tenant','fk_evidence_asset_tenant','fk_evidence_recorder_tenant','fk_evidence_reviewer_tenant'];
 
 const requiredChecks=['chk_asset_area_nonnegative','chk_asset_status','chk_asset_legal_status',
   'chk_appraisal_market_value','chk_appraisal_liquidation','chk_appraisal_base_haircut',
@@ -38,7 +38,7 @@ try {
   const activeTriggers=await client.query(`SELECT tgname
     FROM pg_trigger WHERE NOT tgisinternal AND tgenabled IN ('O','A')`);
   const triggerSet=new Set(activeTriggers.rows.map(x=>x.tgname));
-  for(const trigger of ['collman_audit_immutable','collman_workflow_immutable'])
+  for(const trigger of ['collman_audit_immutable','collman_workflow_immutable','collman_evidence_append_only'])
     if(!triggerSet.has(trigger)) throw new Error('Missing audit history protection: '+trigger);
   const rows=await client.query('SELECT version,checksum FROM schema_migrations');
   if(rows.rowCount!==files.length) throw new Error('Unexpected PostgreSQL migration count');
