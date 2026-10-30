@@ -3,7 +3,7 @@
  * bypass the existing Maker/Checker/Reviewer/Approver approval workflow.
  */
 import {problem,required} from './domain.js';
-import {TASK_LANES,taskStage,taskSla,taskLaneAfterTransition,canReceiveTask,parseInspectionDate,inspectionDeadline} from './task-rules.js';
+import {TASK_LANES,taskStage,taskSla,taskLaneAfterTransition,canReceiveTask,parseInspectionDate,inspectionDeadline,todayWIB} from './task-rules.js';
 
 const result=(json,status=200)=>new Response(JSON.stringify(json),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
 const must=(ok,message,status=403)=>{if(!ok)throw problem(message,status);};
@@ -66,7 +66,7 @@ export async function taskRoutes(request,db,actor,path,url){
     FROM assets a LEFT JOIN task_state t ON t.asset_id=a.id AND t.tenant_id=a.tenant_id
     LEFT JOIN users u ON u.id=t.assigned_to AND u.tenant_id=t.tenant_id
     WHERE ${where} ORDER BY a.updated_at DESC LIMIT 50 OFFSET ?`,...params,offset);
-  const today=new Date().toISOString().slice(0,10);
+  const today=todayWIB();
   return result({records:records.map(x=>({...x,role_owner:taskStage(x.status),sla:taskSla(x.due_date,today)})),total:total.total,offset,
    sla_policy:'2 weekdays following completed inspection; national/public holidays not yet configured. No automatic due date before completed inspection.'});
  }
