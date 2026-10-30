@@ -1,6 +1,7 @@
+import {BUILTIN_TYPES} from '../public/collateral-catalog.js';
 /** Pure business rules. All rupiah figures are integers; rates are percentages. */
 export const ROLES = ['ADMIN', 'MAKER', 'CHECKER', 'REVIEWER', 'APPROVER', 'AUDITOR'];
-export const TYPES = ['Tanah Kosong', 'Rumah Tinggal', 'Ruko', 'Gudang', 'Pabrik', 'Kios', 'Apartemen', 'Lainnya'];
+export const TYPES = BUILTIN_TYPES.map(type=>type.name);
 export const RISK_FLAGS = ['banjir', 'sutet', 'tpu', 'jalur_hijau', 'akses_jalan', 'perubahan_ilegal'];
 export const STATUS_LABELS = {
   DRAFT: 'Draft', SUBMITTED: 'Menunggu Checker', REVIEWED: 'Menunggu Reviewer',
