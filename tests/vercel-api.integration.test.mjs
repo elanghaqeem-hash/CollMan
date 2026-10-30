@@ -58,6 +58,20 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   const created=await call('POST','/api/assets',assetInfo,maker);
   assert.equal(created.status,201,JSON.stringify(created.data));
   const id=created.data.id;
+  const makerTasks=await call('GET','/api/tasks?scope=mine',undefined,maker);
+  assert.equal(makerTasks.status,200,JSON.stringify(makerTasks.data));
+  assert.ok(makerTasks.data.records.some(t=>t.id===id&&t.lane==='OPEN'&&t.role_owner==='MAKER'));
+  assert.equal((await call('POST','/api/tasks/'+id+'/receive',{},checker)).status,403);
+  assert.equal((await call('POST','/api/tasks/'+id+'/receive',{},auditor)).status,403);
+  assert.equal((await call('POST','/api/tasks/'+id+'/start',{},maker)).status,409);
+  assert.equal((await call('POST','/api/tasks/'+id+'/receive',{},maker)).status,200);
+  assert.equal((await call('POST','/api/tasks/'+id+'/start',{},maker)).status,200);
+  const inspectDate=new Date().toISOString().slice(0,10);
+  const inspect=await call('PUT','/api/tasks/'+id+'/inspection',{date:inspectDate},maker);
+  assert.equal(inspect.status,200,JSON.stringify(inspect.data));
+  assert.ok(inspect.data.due_date>inspectDate);
+  assert.equal((await call('PUT','/api/tasks/'+id+'/inspection',{date:inspectDate},maker)).status,409);
+  assert.equal((await call('PUT','/api/tasks/'+id+'/inspection',{date:inspectDate},checker)).status,403);
   assert.equal((await call('PUT','/api/assets/'+id,assetInfo,maker)).status,200);
   const list=await call('GET','/api/assets?q=UAT',undefined,maker);
   assert.equal(list.status,200);
@@ -93,6 +107,17 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
     evidence_type:'LEGAL_DOCUMENT',source_name:'Unauthorized',reference_no:'TEST'},auditor)).status,403);
   assert.equal((await call('POST','/api/assets/'+id+'/transition',{action:'APPROVE'},maker)).status,403);
   for(const [cookie,action,want] of [[maker,'SUBMIT','SUBMITTED'],[checker,'CHECK','REVIEWED'],[reviewer,'RECOMMEND','RECOMMENDED'],[approver,'APPROVE','APPROVED']]){
+    if(action==='CHECK'){
+      const asg=await call('POST','/api/tasks/'+id+'/assign',{user_id:userIds.CHECKER},admin);
+      assert.equal(asg.status,200,JSON.stringify(asg.data));
+      assert.equal((await call('POST','/api/tasks/'+id+'/receive',{},reviewer)).status,403);
+    }
+    if(action!=='SUBMIT'){
+      const received=await call('POST','/api/tasks/'+id+'/receive',{},cookie);
+      assert.equal(received.status,200,JSON.stringify(received.data));
+      const started=await call('POST','/api/tasks/'+id+'/start',{},cookie);
+      assert.equal(started.status,200,JSON.stringify(started.data));
+    }
     const r=await call('POST','/api/assets/'+id+'/transition',{action},cookie);
     assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.status,want);
     if(action==='SUBMIT'){
@@ -111,6 +136,13 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   const final=await call('GET','/api/assets/'+id,undefined,auditor);
   assert.equal(final.status,200);
   assert.equal(final.data.history.length,4);
+  const finished=await call('GET','/api/tasks?lane=FINISHED&scope=all',undefined,admin);
+  assert.equal(finished.status,200,JSON.stringify(finished.data));
+  const finishedCase=finished.data.records.find(t=>t.id===id);
+  assert.equal(finishedCase?.lane,'FINISHED');
+  assert.equal(finishedCase?.inspection_date,inspectDate);
+  assert.equal(finishedCase?.due_date,inspect.data.due_date);
+  assert.equal((await call('GET','/api/tasks?scope=all',undefined,maker)).status,403);
   assert.equal(final.data.evidence.length,1);
   assert.equal(final.data.evidence[0].review_status,'REVIEWED_INTERNAL');
   assert.ok(final.data.evidence[0].reviewed_by_name);
