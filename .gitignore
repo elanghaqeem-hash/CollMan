@@ -8,3 +8,8 @@ node_modules/
 *.log
 .DS_Store
 coverage/
+
+.vercel/
+private-evidence/
+playwright-report/
+test-results/

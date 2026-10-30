@@ -1,3 +1,4 @@
+import {completeAsset,valuationInput} from './collateral-fixtures.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
@@ -27,7 +28,7 @@ async function login(email,password) {
   assert.equal(r.status,200,JSON.stringify(r.data));assert.ok(r.cookie);return r.cookie;
 }
 const password='StrongPassword123!';
-const assetInfo={borrower:'Test only / bukan data nasabah',asset_type:'Ruko',address:'Jalan UAT No 1',land_area:120,building_area:180,legal_status:'SESUAI'};
+const assetInfo={...completeAsset('Ruko'),borrower:'UAT Test only / bukan data nasabah'};
 
 test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation', {skip:!process.env.DATABASE_URL}, async()=>{
   const h=await call('GET','/api/health');
@@ -58,13 +59,20 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   const created=await call('POST','/api/assets',assetInfo,maker);
   assert.equal(created.status,201,JSON.stringify(created.data));
   const id=created.data.id;
-  const financial=await call('POST','/api/assets',{...assetInfo,asset_type:'Deposito',land_area:0,building_area:0},maker);
-  assert.equal(financial.status,201,JSON.stringify(financial.data));
-  const financialDetails=await call('GET','/api/assets/'+financial.data.id,undefined,maker);
-  assert.equal(financialDetails.data.asset.asset_type,'Deposito');
-  assert.equal(financialDetails.data.asset.status,'DRAFT');
-  const wrongWorkflow=await call('POST','/api/assets/'+financial.data.id+'/transition',{action:'SUBMIT'},maker);
-  assert.equal(wrongWorkflow.status,409,'Non-property cannot bypass specialized appraisal workflow');
+  const makerTasks=await call('GET','/api/tasks?scope=mine',undefined,maker);
+  assert.equal(makerTasks.status,200,JSON.stringify(makerTasks.data));
+  assert.ok(makerTasks.data.records.some(t=>t.id===id&&t.lane==='OPEN'&&t.role_owner==='MAKER'));
+  assert.equal((await call('POST','/api/tasks/'+id+'/receive',{},checker)).status,403);
+  assert.equal((await call('POST','/api/tasks/'+id+'/receive',{},auditor)).status,403);
+  assert.equal((await call('POST','/api/tasks/'+id+'/start',{},maker)).status,409);
+  assert.equal((await call('POST','/api/tasks/'+id+'/receive',{},maker)).status,200);
+  assert.equal((await call('POST','/api/tasks/'+id+'/start',{},maker)).status,200);
+  const inspectDate=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
+  const inspect=await call('PUT','/api/tasks/'+id+'/inspection',{date:inspectDate},maker);
+  assert.equal(inspect.status,200,JSON.stringify(inspect.data));
+  assert.ok(inspect.data.due_date>inspectDate);
+  assert.equal((await call('PUT','/api/tasks/'+id+'/inspection',{date:inspectDate},maker)).status,409);
+  assert.equal((await call('PUT','/api/tasks/'+id+'/inspection',{date:inspectDate},checker)).status,403);
   assert.equal((await call('PUT','/api/assets/'+id,assetInfo,maker)).status,200);
   const list=await call('GET','/api/assets?q=UAT',undefined,maker);
   assert.equal(list.status,200);
@@ -76,7 +84,7 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   assert.equal(setting.status,200);
   assert.equal((await call('GET','/api/settings',undefined,maker)).data.risk_weights.banjir,5);
   assert.equal((await call('PUT','/api/settings',{risk_weights:{banjir:99}},maker)).status,403);
-  const appr=await call('PUT','/api/assets/'+id+'/appraisal',{market_value:1000000000,base_haircut_pct:20,risk_flags:{banjir:true},valuation_date:'2026-10-29'},maker);
+  const appr=await call('PUT','/api/assets/'+id+'/appraisal',valuationInput('MANUAL_MARKET',{valuation_inputs:{amount:1000000000},base_haircut_pct:20,risk_flags:{banjir:true},valuation_date:'2026-10-29'}),maker);
   assert.equal(appr.status,200,JSON.stringify(appr.data));
   assert.equal(appr.data.calculation.liquidation_value,750000000);
   const comp=await call('POST','/api/assets/'+id+'/comparables',{description:'UAT comparable',source_url:'https://example.com',offering_price:1200000000},maker);
@@ -86,16 +94,61 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   const compAgain=await call('POST','/api/assets/'+id+'/comparables',{description:'UAT comparable',offering_price:1200000000},maker);
   assert.equal(compAgain.status,201);
   assert.equal((await call('GET','/api/assets/'+id,undefined,checker)).data.comparables.length,1);
+  // Evidence metadata must persist, remain tenant-scoped, and be reviewable only by
+  // independent Checker/Reviewer at the correct workflow stage.
+  const ev=await call('POST','/api/assets/'+id+'/evidence',{
+    evidence_type:'LEGAL_DOCUMENT',source_name:'Test internal source',
+    reference_no:'UAT-LEGAL-001',notes:'For integration testing only'},maker);
+  assert.equal(ev.status,201,JSON.stringify(ev.data));
+  const evidenceId=ev.data.id;
+  assert.equal((await call('GET','/api/assets/'+id+'/evidence',undefined,auditor)).data.records.length,1);
+  assert.equal((await call('POST','/api/assets/'+id+'/evidence/'+evidenceId+'/review',
+    {decision:'REVIEWED_INTERNAL',note:'Recorded internally for test'},checker)).status,403);
+  assert.equal((await call('POST','/api/assets/'+id+'/evidence', {
+    evidence_type:'LEGAL_DOCUMENT',source_name:'Unauthorized',reference_no:'TEST'},auditor)).status,403);
   assert.equal((await call('POST','/api/assets/'+id+'/transition',{action:'APPROVE'},maker)).status,403);
   for(const [cookie,action,want] of [[maker,'SUBMIT','SUBMITTED'],[checker,'CHECK','REVIEWED'],[reviewer,'RECOMMEND','RECOMMENDED'],[approver,'APPROVE','APPROVED']]){
+    if(action==='CHECK'){
+      const asg=await call('POST','/api/tasks/'+id+'/assign',{user_id:userIds.CHECKER},admin);
+      assert.equal(asg.status,200,JSON.stringify(asg.data));
+      assert.equal((await call('POST','/api/tasks/'+id+'/receive',{},reviewer)).status,403);
+    }
+    if(action!=='SUBMIT'){
+      const accepted=await call('POST','/api/tasks/'+id+'/receive',{},cookie);
+      assert.equal(accepted.status,200,JSON.stringify(accepted.data));
+      const started=await call('POST','/api/tasks/'+id+'/start',{},cookie);
+      assert.equal(started.status,200,JSON.stringify(started.data));
+    }
+    if(action==='APPROVE')assert.equal((await call('PUT','/api/assets/'+id+'/eligibility',{eligibility_status:'ELIGIBLE',eligibility_notes:'Policy reviewed by checker'},checker)).status,200);
     const r=await call('POST','/api/assets/'+id+'/transition',{action},cookie);
     assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.status,want);
+    if(action==='SUBMIT'){
+      const reviewed=await call('POST','/api/assets/'+id+'/evidence/'+evidenceId+'/review',
+        {decision:'REVIEWED_INTERNAL',note:'Reviewed independent supporting evidence'},checker);
+      assert.equal(reviewed.status,200,JSON.stringify(reviewed.data));
+      assert.equal(reviewed.data.status,'REVIEWED_INTERNAL');
+      assert.equal((await call('POST','/api/assets/'+id+'/evidence/'+evidenceId+'/review',
+        {decision:'DISPUTED',note:'Attempt unauthorized second review'},checker)).status,403);
+      assert.equal((await call('POST','/api/assets/'+id+'/evidence/'+evidenceId+'/review',
+        {decision:'DISPUTED',note:'Maker self review attempt'},maker)).status,403);
+    }
   }
   assert.equal((await call('PUT','/api/assets/'+id,assetInfo,maker)).status,403);
   assert.equal((await call('POST','/api/assets/'+id+'/transition',{action:'APPROVE'},approver)).status,403);
   const final=await call('GET','/api/assets/'+id,undefined,auditor);
   assert.equal(final.status,200);
   assert.equal(final.data.history.length,4);
+  const finished=await call('GET','/api/tasks?lane=FINISHED&scope=all',undefined,admin);
+  assert.equal(finished.status,200,JSON.stringify(finished.data));
+  const finishedCase=finished.data.records.find(t=>t.id===id);
+  assert.equal(finishedCase?.lane,'FINISHED');
+  assert.equal(finishedCase?.inspection_date,inspectDate);
+  assert.equal(finishedCase?.due_date,inspect.data.due_date);
+  assert.equal((await call('GET','/api/tasks?scope=all',undefined,maker)).status,403);
+  assert.equal((await call('POST','/api/tasks/'+id+'/receive',{},auditor)).status,409);
+  assert.equal(final.data.evidence.length,1);
+  assert.equal(final.data.evidence[0].review_status,'REVIEWED_INTERNAL');
+  assert.ok(final.data.evidence[0].reviewed_by_name);
   const dashboard=await call('GET','/api/dashboard',undefined,admin);
   assert.equal(dashboard.status,200);assert.equal(Number(dashboard.data.assets.approved_liquidation),750000000);
   const journal=await call('GET','/api/audit',undefined,auditor);
@@ -104,7 +157,7 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   const second=await call('POST','/api/assets',assetInfo,maker);
   assert.equal(second.status,201);
   const secondId=second.data.id;
-  assert.equal((await call('PUT','/api/assets/'+secondId+'/appraisal',{market_value:100000,base_haircut_pct:15},maker)).status,200);
+  assert.equal((await call('PUT','/api/assets/'+secondId+'/appraisal',valuationInput('MANUAL_MARKET',{valuation_inputs:{amount:100000},base_haircut_pct:15}),maker)).status,200);
   assert.equal((await call('POST','/api/assets/'+secondId+'/transition',{action:'SUBMIT'},maker)).status,200);
   assert.equal((await call('POST','/api/assets/'+secondId+'/transition',{action:'RETURN',note:'Need correction'},checker)).status,200);
   assert.equal((await call('POST','/api/assets/'+secondId+'/transition',{action:'SUBMIT'},maker)).status,200);
@@ -142,7 +195,7 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   assert.equal(raceCreated.status,201);
   const raceId=raceCreated.data.id;
   const raceVal=await call('PUT','/api/assets/'+raceId+'/appraisal',
-    {market_value:100000000,base_haircut_pct:10},maker);
+    valuationInput('MANUAL_MARKET',{valuation_inputs:{amount:100000000},base_haircut_pct:10}),maker);
   assert.equal(raceVal.status,200);
   const raceOwner=await db.prepare('SELECT tenant_id FROM users WHERE id=?').bind(userIds.MAKER).first();
   const independentPool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:1});

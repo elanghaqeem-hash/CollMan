@@ -52,6 +52,10 @@ jobs:
         run: npm run db:verify
       - name: API integration (RBAC, segregation of duties, approvals, audit, tenant)
         run: npm run test:integration
+      - name: Every collateral category and enterprise API on real PostgreSQL
+        run: node --test tests/collateral-api.test.mjs tests/enterprise-api.test.mjs
+        env:
+          COLLMAN_REAL_PG_ISOLATED: '1'
       - name: Standalone Node HTTP handler smoke test
         run: node --test tests/vercel-handler.integration.test.mjs
       - name: Install headless Chromium for frontend UAT
@@ -60,6 +64,20 @@ jobs:
           npx playwright install --with-deps chromium
       - name: "Browser E2E: desktop, mobile, login and menu navigation"
         run: node --test tests/frontend.e2e.mjs
+      - name: Browser enterprise flow on isolated PostgreSQL WASM (desktop and mobile)
+        run: node --test tests/enterprise-frontend.e2e.mjs
+      - name: Restore rehearsal on isolated CI database only
+        env:
+          CI_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          docker exec "$CI_POSTGRES_CONTAINER" pg_dump -U collman -d collman_ci --format=custom > "$RUNNER_TEMP/collman-synthetic.backup"
+          sha256sum "$RUNNER_TEMP/collman-synthetic.backup"
+          docker exec "$CI_POSTGRES_CONTAINER" createdb -U collman collman_restore_ci
+          docker exec -i "$CI_POSTGRES_CONTAINER" pg_restore -U collman -d collman_restore_ci --exit-on-error < "$RUNNER_TEMP/collman-synthetic.backup"
+          DATABASE_URL=postgresql://collman:ci_only_not_production@localhost:5432/collman_restore_ci node scripts/check-db.mjs
+          COLLMAN_CI_RESTORE_URL=postgresql://collman:ci_only_not_production@localhost:5432/collman_restore_ci node scripts/compare-ci-restore.mjs
+          docker exec "$CI_POSTGRES_CONTAINER" psql -U collman -d collman_restore_ci -c "SELECT version,checksum FROM schema_migrations ORDER BY version;"
       - name: Confirm migration is idempotent
         run: npm run db:migrate
       - name: Re-verify database is safe after integration tests

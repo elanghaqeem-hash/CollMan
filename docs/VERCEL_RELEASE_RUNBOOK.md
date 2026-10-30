@@ -53,5 +53,11 @@ Immediately before switch:
 ## Rollback
 If any production check fails, pause writes, restore the previous production deployment or remove active routing to unverified release; preserve DB backup and audit. Do not redirect users back to Cloudflare until data consistency and authorized credentials are confirmed.
 
-## Outstanding prerequisite
-Vercel access **now confirmed** for team ID `team_Y6DNKOu4wHEjmSax8LeZ1B7J` (name `serayamg`; dashboard slug `collman`). Project ID `prj_XfJOcY7dzut4OdM1Tx2cbyfpZflW`, bound to `elanghaqeem-hash/CollMan`. Preview commit `fef5ff4a` was READY; domain `collman-lemon.vercel.app` verified, but no production deployment is live. Project environment variables are empty and no database is provisioned. Prisma Postgres Vercel Marketplace integration is installed but no resources are connected. Create project database and secure secrets before migration and live UAT. The Prisma Postgres Marketplace integration's Free plan is useful for non-commercial isolated UAT only; use an appropriate contracted plan, backups and controls for bank production.
+## Latest verified state — 30 October 2026
+The legacy statement that no production deployment/database exists is superseded by `docs/PRODUCTION_AUDIT_2026-10-30.md`.
+- Vercel production alias `collman-lemon.vercel.app` is assigned to a READY deployment.
+- A read-only GitHub Actions probe confirms live frontend, PostgreSQL health, metadata, completed administrator bootstrap and anonymous API access denial.
+- Separate Prisma Postgres stores exist, but their links are reversed **by resource name**: Preview → `collman-production-db`, Production → `collman-uat-db`. Database contents and backup state must be inventoried before changing links.
+- Source Cloudflare Durable Objects namespace still lists zero objects (not a SQL row count).
+- Commercial operation remains **NO-GO** until database identity, migration checksum, backup/restore and all role UAT requirements are confirmed; Vercel Hobby is not a commercial production plan.
+- Do not automatically swap URLs or migrate data. Preserve current operational state and investigate safely.

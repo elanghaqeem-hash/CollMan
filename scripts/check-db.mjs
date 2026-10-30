@@ -5,16 +5,16 @@ import {basename,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {getPostgres} from '../src/postgres.js';
 
-const requiredTables=['tenants','users','sessions','tenant_settings','assets','appraisals',
-  'comparables','workflow_history','audit_log','login_attempts','schema_migrations'];
+const requiredTables=['valuation_models','valuation_runs','facilities','collateral_allocations','tenants','users','sessions','tenant_settings','assets','appraisals',
+  'comparables','workflow_history','audit_log','login_attempts','asset_evidence','task_state','schema_migrations'];
 const requiredConstraints=['fk_asset_creator_tenant','fk_appraisal_asset_tenant',
   'fk_appraisal_editor_tenant','fk_comparable_asset_tenant','fk_comparable_creator_tenant',
-  'fk_workflow_asset_tenant','fk_workflow_actor_tenant','fk_audit_actor_tenant'];
+  'fk_workflow_asset_tenant','fk_workflow_actor_tenant','fk_audit_actor_tenant','fk_evidence_asset_tenant','fk_evidence_recorder_tenant','fk_evidence_reviewer_tenant','fk_task_asset_tenant','fk_task_assignee_tenant','fk_task_receiver_tenant','fk_task_starter_tenant','fk_task_updater_tenant'];
 
 const requiredChecks=['chk_asset_area_nonnegative','chk_asset_status','chk_asset_legal_status',
   'chk_appraisal_market_value','chk_appraisal_liquidation','chk_appraisal_base_haircut',
   'chk_appraisal_risk_haircut','chk_appraisal_total_haircut','chk_comparable_price',
-  'chk_comparable_area','chk_workflow_to_status','chk_login_attempts_nonnegative'];
+  'chk_comparable_area','chk_task_lane_invariants','chk_task_inspection_consistency','chk_workflow_to_status','chk_login_attempts_nonnegative'];
 
 const dir=fileURLToPath(new URL('../migrations/postgres/',import.meta.url));
 const files=(await readdir(dir)).filter(f=>/^\d{4}_[a-z0-9_]+\.sql$/.test(f)).sort();
@@ -38,7 +38,7 @@ try {
   const activeTriggers=await client.query(`SELECT tgname
     FROM pg_trigger WHERE NOT tgisinternal AND tgenabled IN ('O','A')`);
   const triggerSet=new Set(activeTriggers.rows.map(x=>x.tgname));
-  for(const trigger of ['collman_audit_immutable','collman_workflow_immutable'])
+  for(const trigger of ['collman_audit_immutable','collman_workflow_immutable','collman_evidence_append_only','valuation_model_guard','valuation_runs_immutable','collateral_allocation_guard'])
     if(!triggerSet.has(trigger)) throw new Error('Missing audit history protection: '+trigger);
   const rows=await client.query('SELECT version,checksum FROM schema_migrations');
   if(rows.rowCount!==files.length) throw new Error('Unexpected PostgreSQL migration count');

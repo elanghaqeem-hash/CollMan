@@ -2,13 +2,7 @@ import {BUILTIN_TYPES} from '../public/collateral-catalog.js';
 /** Pure business rules. All rupiah figures are integers; rates are percentages. */
 export const ROLES = ['ADMIN', 'MAKER', 'CHECKER', 'REVIEWER', 'APPROVER', 'AUDITOR'];
 export const TYPES = BUILTIN_TYPES.map(type=>type.name);
-export const LEGACY_TYPES = ['Tanah Kosong','Rumah Tinggal','Ruko','Gudang','Pabrik','Kios','Apartemen','Lainnya'];
-/** The legacy appraiser workflow has no specialized methods or security controls for other assets. */
-export function mayUseLegacyAppraisal(typeName){
- const item=BUILTIN_TYPES.find(type=>type.name===typeName);
- return LEGACY_TYPES.includes(typeName)||item?.group==='PROPERTY';
-}
-export const RISK_FLAGS = ['banjir', 'sutet', 'tpu', 'jalur_hijau', 'akses_jalan', 'perubahan_ilegal'];
+export const RISK_FLAGS = ['banjir', 'sutet', 'tpu', 'jalur_hijau', 'akses_jalan', 'perubahan_ilegal', 'harga_usang', 'likuiditas', 'konsentrasi', 'kerusakan', 'kedaluwarsa', 'sengketa'];
 export const STATUS_LABELS = {
   DRAFT: 'Draft', SUBMITTED: 'Menunggu Checker', REVIEWED: 'Menunggu Reviewer',
   RECOMMENDED: 'Menunggu Approver', APPROVED: 'Disetujui', RETURNED: 'Perlu Perbaikan', REJECTED: 'Ditolak'
@@ -38,10 +32,10 @@ export function optional(value, max = 500) {
   if (text.length > max) throw problem(`Teks melebihi ${max} karakter.`);
   return text;
 }
-export function validateAsset(data) {
+export function validateAsset(data, types = TYPES) {
   if (!data || typeof data !== 'object') throw problem('Data agunan tidak valid.');
-  const assetType = required(data.asset_type, 'Jenis agunan', 50);
-  if (!TYPES.includes(assetType)) throw problem('Jenis agunan tidak dikenal.');
+  const assetType = required(data.asset_type, 'Jenis agunan', 100);
+  if (!types.includes(assetType)) throw problem('Jenis agunan tidak dikenal.');
   return {
     borrower: required(data.borrower, 'Nama debitur'), asset_type: assetType,
     address: required(data.address, 'Alamat agunan', 500),

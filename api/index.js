@@ -42,7 +42,10 @@ export default async function handler(req,res) {
     }
     const request=new Request(url,{method,headers,body});
     const db=getPostgres();
-    const result=await handleCollManApi(request,{BOOTSTRAP_TOKEN:process.env.BOOTSTRAP_TOKEN},db);
+    const integrations={};
+    for (const key of ['ATR_BPN_VERIFY_URL','ATR_BPN_API_KEY','OCR_PROVIDER_URL','OCR_API_KEY',
+      'AI_APPRAISAL_URL','AI_APPRAISAL_API_KEY','SPATIAL_PROVIDER_URL','SPATIAL_API_KEY']) integrations[key]=process.env[key];
+    const result=await handleCollManApi(request,{BOOTSTRAP_TOKEN:process.env.BOOTSTRAP_TOKEN,...integrations},db);
     res.statusCode=result.status;
     for(const [key,value] of result.headers) res.setHeader(key,value);
     res.setHeader('x-content-type-options','nosniff');

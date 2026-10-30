@@ -1,0 +1,31 @@
+name: CollMan authorized live UAT login (read-only business data)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: collman-authorized-uat-login
+  cancel-in-progress: false
+jobs:
+  six-role-login:
+    # Configure the GitHub Environment 'uat' with required reviewer approval
+    # before placing any sensitive credentials in its environment secrets.
+    environment: uat
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UAT_BASE_URL: ${{ secrets.COLLMAN_UAT_BASE_URL }}
+      UAT_ROLE_ACCOUNTS: ${{ secrets.COLLMAN_UAT_ROLE_ACCOUNTS }}
+      UAT_OIDC_TOKEN: ${{ secrets.COLLMAN_UAT_OIDC_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Confirm approved UAT configuration is present
+        shell: bash
+        run: |
+          test -n "$UAT_BASE_URL" || { echo "BLOCKED: no UAT endpoint configured"; exit 2; }
+          test -n "$UAT_ROLE_ACCOUNTS" || { echo "BLOCKED: no six-role UAT credentials configured"; exit 2; }
+      - name: Check six-role live login and read-only business authorization
+        run: node scripts/uat-login.mjs
