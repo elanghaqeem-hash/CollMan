@@ -10,6 +10,7 @@ export const TASK_ROLE_BY_STATUS=Object.freeze({
  RECOMMENDED:'APPROVER',APPROVED:null,REJECTED:null
 });
 const ISO=/^\d{4}-\d{2}-\d{2}$/;
+export const todayWIB=()=>new Date(Date.now()+7*60*60*1000).toISOString().slice(0,10);
 export function parseInspectionDate(date){
  if(typeof date!=='string'||!ISO.test(date))throw problem('Tanggal inspeksi wajib YYYY-MM-DD.');
  const d=new Date(date+'T00:00:00.000Z');
