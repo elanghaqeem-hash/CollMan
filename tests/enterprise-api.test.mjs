@@ -26,11 +26,19 @@ test('governed model versions, independent signoff, append-only runs, tenant and
   assert.equal((await api('MAKER','POST','/api/models',def)).status,403);
   const created=await api('ADMIN','POST','/api/models',def);assert.equal(created.status,201,JSON.stringify(created));const id=created.body.id;
   assert.equal((await api('APPROVER','POST','/api/models/'+id+'/approve',{reference:'Synthetic approval'})).status,409);
-  const review={reference:'Synthetic validation',note:'Synthetic review; no bank signoff implied',observations:[{category:'CASH',region:'TEST_REGION',predicted:100,actual:100,realized_on:'2026-10-01',realization_ref:'Synthetic A'},{category:'CASH',region:'TEST_REGION',predicted:100,actual:110,realized_on:'2026-10-01',realization_ref:'Synthetic B'}]};
+  const review={reference:'Synthetic validation',note:'Synthetic review; no bank signoff implied',observations:[{category:'CASH',region:'TEST_REGION',predicted:100,actual:100,predicted_on:'2026-09-01',prediction_ref:'Archived synthetic forecast A',realized_on:'2026-10-01',realization_ref:'Synthetic A'},{category:'CASH',region:'TEST_REGION',predicted:100,actual:110,predicted_on:'2026-09-02',prediction_ref:'Archived synthetic forecast B',realized_on:'2026-10-01',realization_ref:'Synthetic B'}]};
   assert.equal((await api('ADMIN','POST','/api/models/'+id+'/review',review)).status,403);
   assert.equal((await api('REVIEWER','POST','/api/models/'+id+'/review',{...review,observations:[null]})).status,400);
   assert.equal((await api('REVIEWER','POST','/api/models/'+id+'/review',review)).status,200);
   assert.equal((await api('APPROVER','POST','/api/models/'+id+'/approve',{reference:'Synthetic approval'})).status,200);
+  // A reviewer may record limited descriptive backtests, but an Approver cannot certify
+  // a model without dated historical predictions linked to all realization observations.
+  const incompleteModel=await api('ADMIN','POST','/api/models',{...def,version:'2'});
+  assert.equal(incompleteModel.status,201);
+  const undatedReview={...review,observations:review.observations.map(({predicted_on,prediction_ref,...observation})=>observation)};
+  assert.equal((await api('REVIEWER','POST','/api/models/'+incompleteModel.body.id+'/review',undatedReview)).status,200);
+  assert.equal((await api('APPROVER','POST','/api/models/'+incompleteModel.body.id+'/approve',{reference:'Cannot certify undated estimates'})).status,409);
+  assert.equal((await api('AUDITOR','GET','/api/models')).body.records.find(x=>x.id===incompleteModel.body.id).status,'REVIEWED');
   await assert.rejects(db.prepare('UPDATE valuation_models SET parameters=? WHERE id=?').bind('{}',id).run(),{code:'23514'});
   const asset=await api('MAKER','POST','/api/assets',completeAsset('Deposito'));assert.equal(asset.status,201);
   const body={model_id:id,region:'TEST_REGION',as_of:'2026-10-30',input:{currency:'IDR',balance:100,blocked_amount:80,source:{reference:'Synthetic balance',as_of:'2026-10-29'},liquidation_amount:80,liquidation_basis:'Confirmed redeemable cash',bank_accepted_amount:80,bank_policy_ref:'Synthetic policy'}};
