@@ -1,7 +1,7 @@
 import {escapeText, currency, riskLabels, statusText, actionText} from './helpers.js';
 import {requestApi as api,validateMetadata} from './api-client.js';
 const app=document.getElementById('app');
-const state={user:null,needSetup:false,configError:'',view:'dashboard',dashboard:null,list:null,detail:null,settings:null,users:null,audit:null,integrations:null,search:'',status:'',edit:false,mobile:false,busy:false};
+const state={user:null,needSetup:false,configError:'',view:'dashboard',dashboard:null,list:null,detail:null,settings:null,users:null,audit:null,integrations:null,tasks:null,taskUsers:null,taskLane:'',search:'',status:'',edit:false,mobile:false,busy:false};
 const esc=escapeText;
 const money=currency;
 const btn=(name,text,kind='')=>`<button type="button" class="btn ${kind}" data-action="${name}">${text}</button>`;
@@ -23,7 +23,7 @@ function renderAuth(){
  <button type="submit" class="btn primary">${setup?'Aktivasi Administrator':'Masuk ke CollMan'}</button></form>`:''}
  <div class="auth-powered">Akses terbatas • Sesi 12 jam • Segregation of duties</div></div></div></div>`;
 }
-const NAV=[['dashboard','◫','Dashboard'],['assets','▦','Register Agunan'],['workflow','⇄','Workflow Persetujuan'],['report','▤','Laporan & Analitik'],['audit','◷','Audit Trail'],['settings','⚙','Parameter Risiko'],['users','♙','Manajemen Pengguna'],['integrations','◎','Kesiapan Integrasi']];
+const NAV=[['dashboard','◫','Dashboard'],['assets','▦','Register Agunan'],['tasks','▣','Task Management'],['workflow','⇄','Workflow Persetujuan'],['report','▤','Laporan & Analitik'],['audit','◷','Audit Trail'],['settings','⚙','Parameter Risiko'],['users','♙','Manajemen Pengguna'],['integrations','◎','Kesiapan Integrasi']];
 function renderShell(){
  const nav=NAV.filter(([key])=>(!['audit','settings','users'].includes(key)|| (key==='audit'?['ADMIN','AUDITOR'].includes(state.user.role):key==='settings'?true:state.user.role==='ADMIN')) && (key!=='integrations'||['ADMIN','AUDITOR'].includes(state.user.role)));
  const active=NAV.find(x=>x[0]===state.view)?.[2]||'CollMan';
@@ -32,7 +32,7 @@ function renderShell(){
 }
 function head(label,title,desc,buttons=''){return `<div class="pagehead"><div><div class="eyebrow">${esc(label)}</div><h1>${esc(title)}</h1><p>${esc(desc)}</p></div><div class="actions">${buttons}</div></div>`;}
 function renderContent(){const el=document.getElementById('page');if(!el)return;
- switch(state.view){case 'dashboard':el.innerHTML=dashboard();break;case 'assets':el.innerHTML=assets();break;case 'asset':el.innerHTML=assetDetail();break;case 'assetform':el.innerHTML=assetForm();break;case 'workflow':el.innerHTML=workflow();break;case 'report':el.innerHTML=report();break;case 'settings':el.innerHTML=settings();break;case 'users':el.innerHTML=users();break;case 'audit':el.innerHTML=audit();break;case 'integrations':el.innerHTML=integrationsView();break;case 'password':el.innerHTML=passwordForm();break;default:el.innerHTML=empty('Tidak ditemukan','Pilih menu di samping.');}}
+ switch(state.view){case 'dashboard':el.innerHTML=dashboard();break;case 'assets':el.innerHTML=assets();break;case 'tasks':el.innerHTML=taskPage();break;case 'asset':el.innerHTML=assetDetail();break;case 'assetform':el.innerHTML=assetForm();break;case 'workflow':el.innerHTML=workflow();break;case 'report':el.innerHTML=report();break;case 'settings':el.innerHTML=settings();break;case 'users':el.innerHTML=users();break;case 'audit':el.innerHTML=audit();break;case 'integrations':el.innerHTML=integrationsView();break;case 'password':el.innerHTML=passwordForm();break;default:el.innerHTML=empty('Tidak ditemukan','Pilih menu di samping.');}}
 async function loadView(){
  state.busy=true;renderShell();document.getElementById('page').innerHTML=`<div class="card">Memuat data…</div>`;
  try{
@@ -42,9 +42,48 @@ async function loadView(){
   if(state.view==='settings')state.settings=await api('/api/settings');
   if(state.view==='users')state.users=await api('/api/users');
   if(state.view==='audit')state.audit=await api('/api/audit');
+  if(state.view==='tasks'){state.tasks=await api('/api/tasks?lane='+encodeURIComponent(state.taskLane));
+    if(state.user.role==='ADMIN')state.taskUsers=(await api('/api/users')).records;}
   if(state.view==='integrations')state.integrations=await api('/api/integrations');
   renderShell();
  }catch(e){renderShell();document.getElementById('page').innerHTML=`<div class="card bad-config">${esc(e.message)}</div>`;notify(e.message,true);}finally{state.busy=false;}}
+function taskPage(){
+ const data=state.tasks||{records:[],total:0};
+ const admin=state.user.role==='ADMIN';
+ const options=[['','Semua lane'],['OPEN','Open Task'],['WAITING','Waiting Task'],['ONGOING','Ongoing Task'],['FINISHED','Finish Task']];
+ const stageName={DRAFT:'Maker',RETURNED:'Maker',SUBMITTED:'Checker',REVIEWED:'Reviewer',RECOMMENDED:'Approver',APPROVED:'Selesai',REJECTED:'Ditolak'};
+ const lanes={OPEN:'Open Task',WAITING:'Waiting Task',ONGOING:'Ongoing Task',FINISHED:'Finish Task'};
+ const rows=(data.records||[]).map(t=>{
+  const owner=t.role_owner;
+  const ownedByMe=(t.assigned_to===state.user.id||(!t.assigned_to && (admin||owner===state.user.role &&
+    (owner!=='MAKER'||t.created_by===state.user.id) && t.created_by!==state.user.id || owner==='MAKER'&&t.created_by===state.user.id)));
+  const canReceive=owner && t.lane==='OPEN'&&ownedByMe&&
+    (admin||state.user.role===owner) && (owner==='MAKER'?t.created_by===state.user.id:t.created_by!==state.user.id);
+  const canStart=owner && t.lane==='WAITING'&&t.received_by===state.user.id;
+  const canInspect=t.lane==='ONGOING' && owner==='MAKER' && t.created_by===state.user.id && !t.inspection_date;
+  const controls=[
+   canReceive?'<button class="btn small" data-task-op="receive" data-task-id="'+esc(t.id)+'">Terima</button>':'',
+   canStart?'<button class="btn small" data-task-op="start" data-task-id="'+esc(t.id)+'">Start</button>':'',
+   canInspect?'<div class="actions"><input class="field" aria-label="Tanggal inspeksi selesai" type="date" data-inspect-date="'+esc(t.id)+'" max="'+new Date().toISOString().slice(0,10)+'"><button class="btn small" data-task-op="inspection" data-task-id="'+esc(t.id)+'">Catat Inspeksi</button></div>':'',
+   admin&&t.lane==='OPEN'&&owner?'<div class="actions"><select class="field" data-task-user="'+esc(t.id)+'" aria-label="Penugasan peran '+esc(owner)+'">'+
+    '<option value="">Pilih '+esc(owner)+'</option>'+(state.taskUsers||[]).filter(u=>u.active===1&&u.role===owner&&(owner!=='MAKER'||u.id===t.created_by) && (owner==='MAKER'||u.id!==t.created_by)).map(u=>'<option value="'+esc(u.id)+'" '+(u.id===t.assigned_to?'selected':'')+'>'+esc(u.display_name)+'</option>').join('')+
+    '</select><button class="btn small" data-task-op="assign" data-task-id="'+esc(t.id)+'">Tugaskan</button></div>':''
+  ].filter(Boolean).join(' ');
+  return '<tr><td><button class="linkbtn" data-open="'+esc(t.id)+'">'+esc(t.reference_no)+'</button><div class="small muted">'+esc(t.borrower)+'</div></td>'+
+   '<td>'+esc(stageName[t.status]||t.status)+'</td><td>'+esc(lanes[t.lane]||t.lane)+'</td>'+
+   '<td>'+esc(t.assigned_name||'Belum ditugaskan')+'</td><td>'+esc(t.inspection_date||'—')+
+   '<div class="small muted">SLA '+esc(t.due_date||'belum dimulai')+'</div>'+
+   '<div class="small muted">'+esc(t.sla==='OVERDUE'?'Lewat SLA':t.sla==='DUE_TODAY'?'Jatuh tempo hari ini':t.sla==='ON_TRACK'?'Dalam SLA':'Menunggu inspeksi')+'</div></td>'+
+   '<td>'+ (controls||'—')+'</td></tr>';
+ });
+ return head('TASK MANAGEMENT','Open / Waiting / Ongoing / Finish Task',
+  data.total+' task sesuai filter dan hak akses pengguna.')+
+  '<div class="card"><div class="filters"><label for="task-lane">Tahap tugas</label><select id="task-lane" class="field">'+
+    options.map(([val,label])=>'<option value="'+esc(val)+'" '+(state.taskLane===val?'selected':'')+'>'+esc(label)+'</option>').join('')+
+   '</select><button class="btn" data-action="filter-tasks">Terapkan</button></div>'+
+   (rows.length?table(['Agunan','Pemegang tahap','Task','Petugas','Inspeksi & SLA','Tindakan'],rows):empty('Tidak ada task','Tidak ada task untuk peran atau lane yang dipilih.'))+
+   '<p class="field-note">SLA: dua hari kerja Senin–Jumat setelah inspeksi selesai, belum memasukkan hari libur nasional. Pengembalian task tidak mereset SLA. Riwayat tindakan tercatat dalam audit trail.</p></div>';
+}
 function integrationsView(){
  const ready=state.integrations||{connectors:{}};
  const labels={atr_bpn:'ATR/BPN (legalitas)',ocr:'OCR dokumen',ai_appraisal:'AI appraisal',spatial_provider:'Peta spasial resmi'};
@@ -207,6 +246,7 @@ async function onClick(event){const nav=event.target.closest('[data-nav]');if(na
   if(action==='new-comparable'){document.getElementById('page').innerHTML=comparableForm();return;}
   if(action==='new-evidence'){document.getElementById('page').innerHTML=evidenceForm();return;}
   if(action==='filter'){state.search=document.getElementById('search').value;state.status=document.getElementById('status-filter').value;await loadView();return;}
+  if(action==='filter-tasks'){state.taskLane=document.getElementById('task-lane').value;await loadView();return;}
   if(action==='offer-analysis'){
    try{const d=await api('/api/assets/'+encodeURIComponent(state.detail.asset.id)+'/offer-analysis');
      const e=document.getElementById('evidence-result');
@@ -220,6 +260,24 @@ async function onClick(event){const nav=event.target.closest('[data-nav]');if(na
   if(action==='print'){window.print();return;}
   if(action==='export-csv'){const data=state.list?.records||[];const heads=['Referensi','Debitur','Jenis','Alamat','Status','Nilai Pasar','Indikasi Likuidasi'];const vals=data.map(a=>[a.reference_no,a.borrower,a.asset_type,a.address,a.status,a.market_value||0,a.liquidation_value||0]);
    const clean=v=>{let s=String(v??'');if(/^[=+\-@\t\r]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';};const csv=[heads,...vals].map(row=>row.map(clean).join(',')).join('\r\n');const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='collman-agunan.csv';a.click();URL.revokeObjectURL(url);return;}
+ }
+ const taskAction=event.target.closest('[data-task-op]');
+ if(taskAction){
+  const operation=taskAction.dataset.taskOp,id=taskAction.dataset.taskId;
+  try{
+   let body,method='POST';
+   if(operation==='inspection'){
+    method='PUT';const date=document.querySelector('[data-inspect-date="'+id+'"]')?.value;
+    if(!date)throw new Error('Masukkan tanggal inspeksi selesai.');body={date};
+    if(!window.confirm('Tanggal inspeksi akan menjadi dasar SLA dan tidak dapat direset. Lanjutkan?'))return;
+   }else if(operation==='assign'){
+    const user_id=document.querySelector('[data-task-user="'+id+'"]')?.value;
+    if(!user_id)throw new Error('Pilih user penugasan terlebih dahulu.');
+    body={user_id};
+   }else if(!window.confirm(operation==='receive'?'Terima task ini?':'Mulai task ini?'))return;
+   await api('/api/tasks/'+encodeURIComponent(id)+'/'+operation,{method,body:body||{}});
+   await loadView();notify('Task berhasil diperbarui.');
+  }catch(e){notify(e.message,true);}return;
  }
  const rev=event.target.closest('[data-review-evidence]');
  if(rev){
