@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {GROUPS,BUILTIN_TYPES} from '../public/collateral-catalog.js';
 import {collateralCategories,collateralTypes,groupForType,typesInGroup,searchCollateralTypes} from '../public/collateral-picker.js';
-import {validateAsset,TYPES} from '../src/domain.js';
+import {validateAsset,TYPES,mayUseLegacyAppraisal} from '../src/domain.js';
 
 const legacy=['Tanah Kosong','Rumah Tinggal','Ruko','Gudang','Pabrik','Kios','Apartemen','Lainnya'];
 const sample={borrower:'Bank Test Synthetic',address:'Lokasi penyimpanan UAT',land_area:0,building_area:0};
