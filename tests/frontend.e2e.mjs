@@ -8,7 +8,7 @@ import handler from '../api/index.js';
 const MIME={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8'};
 test('Login readiness on desktop/mobile: missing API, missing DB, retry recovery',async()=>{
   const web=createServer(async(req,res)=>{
-    const file=req.url==='/'?'index.html':req.url.slice(1);
+    const file=new URL(req.url,'http://localhost').pathname.slice(1)||'index.html';
     if(!['index.html','app.js','helpers.js','api-client.js','collateral-picker.js','collateral-catalog.js','styles.css'].includes(file)){res.writeHead(404).end();return;}
     const body=await readFile(new URL('../public/'+file,import.meta.url));
     res.writeHead(200,{'content-type':MIME[file.slice(file.lastIndexOf('.'))]});res.end(body);
