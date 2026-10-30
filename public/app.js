@@ -92,6 +92,19 @@ function assetDetail(){const d=state.detail;if(!d)return empty('Agunan belum dip
  `<section class="card"><div class="card-head"><div><h2>Identitas & Legalitas Agunan</h2><p>${esc(a.address)}</p></div>${badge(a.status)}</div><div class="info-grid">${fields.map(([k,val])=>`<div><div class="key">${esc(k)}</div><div class="value">${esc(String(val))}</div></div>`).join('')}</div>${a.notes?`<div class="divider"></div><div class="small muted">Catatan: ${esc(a.notes)}</div>`:''}</section>
  <section class="card"><div class="card-head"><div><h2>Hasil Penilaian & Quick Appraisal</h2><p>Nilai pasar, haircut dan indikasi nilai likuidasi</p></div>${canEdit?btn('edit-appraisal',v?'Ubah Penilaian':'+ Tambah Penilaian','small'):''}</div>
  ${v?`<div class="metrics" style="margin-bottom:0;grid-template-columns:repeat(3,minmax(0,1fr))"><div class="kpi-mini"><div class="small muted">Nilai pasar</div><span class="val">${money(v.market_value)}</span></div><div class="kpi-mini"><div class="small muted">Total haircut</div><span class="val">${v.total_haircut_pct}%</span><div class="small muted">Dasar ${v.base_haircut_pct}% + risiko ${v.risk_haircut_pct}%</div></div><div class="kpi-mini"><div class="small muted">Indikasi likuidasi</div><span class="val">${money(v.liquidation_value)}</span></div></div><div class="section-label">Risiko lokasi yang ditandai</div><div class="legend">${Object.entries(riskLabels).filter(([k])=>v.risk_flags[k]).map(([k,l])=>`<span class="pill RETURNED">! ${esc(l)}</span>`).join('')||'<span class="muted">Belum ada bendera risiko ditandai</span>'}</div><p class="field-note" style="margin:15px 0 0">Tanggal penilaian: ${esc(v.valuation_date)}. ${esc(v.notes||'')} Nilai bersifat indikatif, menunggu validasi penilai berwenang.</p>`:empty('Penilaian belum tersedia','Isi market value dan parameter haircut sebelum mengirim untuk review.')}</section>
+ <section class="card"><div class="card-head"><div><h2>Register Bukti Agunan & Review</h2>
+ <p>Metadata legalitas, inspeksi, OCR dan penilaian — tidak menyimpan dokumen mentah.</p></div>${canEdit?btn('new-evidence','+ Catat Bukti','small'):''}</div>
+ <div class="notice warn">Review internal bukan verifikasi resmi ATR/BPN. Bukti bersifat append-only dan tidak dapat dihapus setelah direkam.</div>
+ ${(d.evidence||[]).length?table(['Jenis / Referensi','Sumber / Pencatat','Status review','Tindakan'],(d.evidence||[]).map(e=>{
+  const permitted=(e.review_status==='PENDING_REVIEW'&&e.recorded_by!==state.user.id&&a.created_by!==state.user.id &&
+   (state.user.role==='CHECKER'&&a.status==='SUBMITTED'||state.user.role==='REVIEWER'&&a.status==='REVIEWED'));
+  return '<tr><td><strong>'+esc(e.evidence_type)+'</strong><div class="muted small">'+esc(e.reference_no)+
+  '</div></td><td>'+esc(e.source_name)+'<div class="muted small">'+esc(e.recorded_by_name||'')+
+  '</div></td><td>'+esc(e.review_status)+(e.review_note?'<div class="muted small">'+esc(e.review_note)+'</div>':'')+
+  '</td><td>'+(permitted?'<button class="btn small" data-review-evidence="'+esc(e.id)+'" data-decision="REVIEWED_INTERNAL">Review Internal</button> '+
+   '<button class="btn small" data-review-evidence="'+esc(e.id)+'" data-decision="DISPUTED">Temuan</button>':'—')+'</td></tr>';
+ })):empty('Belum ada bukti','Maker dapat mencatat metadata dokumen; Checker/Reviewer melakukan review terpisah.')}
+ </section>
  <section class="card"><div class="card-head"><div><h2>Analisis Bukti & Skrining Spasial</h2><p>Bahan kajian yang belum terverifikasi — bukan hasil resmi ATR/BPN atau AI appraisal</p></div><button type="button" class="btn small" data-action="offer-analysis">Analisis Harga Pembanding</button></div>
  <div id="evidence-result" class="notice warn">Analisis penawaran dihitung dari input pembanding. OCR, ATR/BPN, AI, dan penyedia GIS resmi masih memerlukan konektor serta UAT.</div>
  <form id="spatial-form"><h3>Pemeriksaan jarak risiko (koordinat manual)</h3><div class="formgrid">
@@ -122,6 +135,18 @@ function audit(){const rows=state.audit?.records||[];return head('CONTROL & COMP
  `<section class="card">${rows.length?table(['Waktu','Pengguna','Entitas','Aksi','Referensi'],rows.map(x=>`<tr><td>${formatDate(x.created_at)}</td><td>${esc(x.actor_name)}</td><td>${esc(x.entity_type)}</td><td><strong>${esc(x.action)}</strong></td><td class="small">${esc(x.entity_id.slice(0,13))}…</td></tr>`)):empty('Belum ada aktivitas','Aktivitas akan muncul setelah penggunaan.')}</section>`;}
 function passwordForm(){return head('KEAMANAN AKUN','Ganti Password','Perubahan password akan mengakhiri seluruh sesi Anda.')+
   `<form id="password-form" class="card" style="max-width:560px"><div class="form-group"><label>Password saat ini</label><input class="field" type="password" name="old_password" required autocomplete="current-password"></div><div class="form-group"><label>Password baru</label><input class="field" type="password" name="new_password" minlength="12" required autocomplete="new-password"><div class="hint">Minimal 12 karakter, huruf besar, huruf kecil, dan angka.</div></div><button class="btn primary" type="submit">Simpan Password Baru</button></form>`;}
+function evidenceForm(){
+ return `<form id="evidence-form" class="card"><div class="card-head"><div><h2>Catat Bukti Agunan</h2>
+ <p>Input metadata saja. Jangan memasukkan teks OCR, KTP, foto sertifikat atau rahasia ke kolom catatan.</p></div>${btn('detail-back','✕ Tutup','small')}</div>
+ <div class="formgrid"><div class="form-group"><label>Jenis bukti</label><select class="field" name="evidence_type" required>
+ ${[['LEGAL_DOCUMENT','Dokumen Legal'],['OWNERSHIP','Kepemilikan'],['VALUATION_SUPPORT','Data Penilaian'],['SITE_SURVEY','Hasil Survei'],['SPATIAL_SCREEN','Analisis Spasial'],['OCR_EXTRACTION','Ekstraksi OCR'],['KJPP_REPORT','Laporan KJPP']].map(([v,t])=>'<option value="'+v+'">'+t+'</option>').join('')}</select></div>
+ <div class="form-group"><label>Sumber / instansi *</label><input class="field" name="source_name" maxlength="200" required></div>
+ <div class="form-group"><label>Nomor referensi bukti *</label><input class="field" name="reference_no" maxlength="200" required></div>
+ <div class="form-group"><label>Digest SHA-256 (opsional)</label><input class="field" name="digest_sha256" pattern="[a-fA-F0-9]{64}" placeholder="64 digit hex (tanpa file)" maxlength="64"></div>
+ <div class="form-group wide"><label>Catatan nonrahasia</label><textarea class="field" name="notes" maxlength="1000"></textarea></div></div>
+ <p class="field-note">Tidak ada file upload pada formulir ini. Hasil review tetap internal dan tidak otomatis mengubah status legalitas.</p>
+ <button type="submit" class="btn primary">Simpan Metadata Bukti</button></form>`;
+}
 function appraisalForm(){const d=state.detail,v=d.appraisal;const flags=v?.risk_flags||{};const now=new Date().toISOString().slice(0,10);
  return `<form id="appraisal-form" class="card"><div class="card-head"><div><h2>${v?'Ubah Penilaian':'Input Penilaian Awal'}</h2><p>Masukkan nilai hasil kajian serta haircut berdasarkan kebijakan internal.</p></div>${btn('detail-back','✕ Tutup','small')}</div><div class="formgrid"><div class="form-group"><label>Nilai pasar (Rp) *</label><input class="field" name="market_value" type="number" min="0" step="1" required value="${Number(v?.market_value??0)}"></div><div class="form-group"><label>Haircut dasar (%) *</label><input class="field" name="base_haircut_pct" type="number" min="0" max="100" step="0.01" required value="${Number(v?.base_haircut_pct??0)}"></div><div class="form-group"><label>Tanggal penilaian</label><input class="field" name="valuation_date" type="date" value="${esc(v?.valuation_date||now)}"></div><div class="form-group wide"><label>Faktor risiko lokasi (tandai hanya jika didukung pemeriksaan)</label><div class="risk-grid">${Object.entries(riskLabels).map(([k,l])=>`<label><input type="checkbox" name="${k}" ${flags[k]?'checked':''}>${esc(l)}</label>`).join('')}</div></div><div class="form-group wide"><label>Catatan penilai / keterbatasan</label><textarea class="field" name="notes" maxlength="2000">${esc(v?.notes||'')}</textarea></div></div><div class="divider"></div><button class="btn primary" type="submit">Simpan Penilaian</button></form>`;
 }
@@ -153,6 +178,10 @@ async function onSubmit(event){const form=event.target;if(!form.id)return;event.
      a.href='https://www.openstreetmap.org/?mlat='+encodeURIComponent(result.latitude)+'&mlon='+encodeURIComponent(result.longitude)+'#map=16/'+encodeURIComponent(result.latitude)+'/'+encodeURIComponent(result.longitude);
      a.target='_blank';a.rel='noopener noreferrer';a.textContent='Lihat titik di peta umum OpenStreetMap (tanpa layer risiko resmi)';
      e.appendChild(a);}
+  }else if(form.id==='evidence-form'){
+   const id=state.detail.asset.id;
+   await api('/api/assets/'+encodeURIComponent(id)+'/evidence',{method:'POST',body:formObj(form)});
+   await loadView();notify('Metadata bukti tercatat, menunggu review.');
   }else if(form.id==='settings-form'){
    await api('/api/settings',{method:'PUT',body:{risk_weights:formObj(form)}});await loadView();notify('Parameter risiko berhasil diperbarui.');
   }else if(form.id==='user-form'){
@@ -176,6 +205,7 @@ async function onClick(event){const nav=event.target.closest('[data-nav]');if(na
   if(action==='detail-back'){await navigate('asset');return;}
   if(action==='edit-appraisal'){document.getElementById('page').innerHTML=appraisalForm();return;}
   if(action==='new-comparable'){document.getElementById('page').innerHTML=comparableForm();return;}
+  if(action==='new-evidence'){document.getElementById('page').innerHTML=evidenceForm();return;}
   if(action==='filter'){state.search=document.getElementById('search').value;state.status=document.getElementById('status-filter').value;await loadView();return;}
   if(action==='offer-analysis'){
    try{const d=await api('/api/assets/'+encodeURIComponent(state.detail.asset.id)+'/offer-analysis');
@@ -190,6 +220,16 @@ async function onClick(event){const nav=event.target.closest('[data-nav]');if(na
   if(action==='print'){window.print();return;}
   if(action==='export-csv'){const data=state.list?.records||[];const heads=['Referensi','Debitur','Jenis','Alamat','Status','Nilai Pasar','Indikasi Likuidasi'];const vals=data.map(a=>[a.reference_no,a.borrower,a.asset_type,a.address,a.status,a.market_value||0,a.liquidation_value||0]);
    const clean=v=>{let s=String(v??'');if(/^[=+\-@\t\r]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';};const csv=[heads,...vals].map(row=>row.map(clean).join(',')).join('\r\n');const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='collman-agunan.csv';a.click();URL.revokeObjectURL(url);return;}
+ }
+ const rev=event.target.closest('[data-review-evidence]');
+ if(rev){
+  const note=window.prompt('Tuliskan hasil review minimal 10 karakter. Review tidak dapat dibatalkan.');
+  if(note===null)return;
+  try{
+   await api('/api/assets/'+encodeURIComponent(state.detail.asset.id)+'/evidence/'+
+    encodeURIComponent(rev.dataset.reviewEvidence)+'/review',{method:'POST',body:{decision:rev.dataset.decision,note}});
+   await loadView();notify('Review bukti berhasil dicatat.');
+  }catch(e){notify(e.message,true);}return;
  }
  const transition=event.target.closest('[data-transition]');if(transition){const action=transition.dataset.transition,note=document.getElementById('workflow-note')?.value||'';
   if(['APPROVE','REJECT'].includes(action) && !window.confirm(`Konfirmasi: ${actionText[action]}?`))return;
