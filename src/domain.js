@@ -2,6 +2,12 @@ import {BUILTIN_TYPES} from '../public/collateral-catalog.js';
 /** Pure business rules. All rupiah figures are integers; rates are percentages. */
 export const ROLES = ['ADMIN', 'MAKER', 'CHECKER', 'REVIEWER', 'APPROVER', 'AUDITOR'];
 export const TYPES = BUILTIN_TYPES.map(type=>type.name);
+export const LEGACY_TYPES = ['Tanah Kosong','Rumah Tinggal','Ruko','Gudang','Pabrik','Kios','Apartemen','Lainnya'];
+/** The legacy appraiser workflow has no specialized methods or security controls for other assets. */
+export function mayUseLegacyAppraisal(typeName){
+ const item=BUILTIN_TYPES.find(type=>type.name===typeName);
+ return LEGACY_TYPES.includes(typeName)||item?.group==='PROPERTY';
+}
 export const RISK_FLAGS = ['banjir', 'sutet', 'tpu', 'jalur_hijau', 'akses_jalan', 'perubahan_ilegal'];
 export const STATUS_LABELS = {
   DRAFT: 'Draft', SUBMITTED: 'Menunggu Checker', REVIEWED: 'Menunggu Reviewer',
