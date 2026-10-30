@@ -3,6 +3,9 @@ import {ROLES, RISK_FLAGS, STATUS_LABELS, ACTIONS, nextWorkflow, numberIn, requi
 
 import {catalogTypes,GROUPS,POLICIES} from '../public/collateral-catalog.js';
 import {validateCollateralAsset as validateAsset,validateCatalog,submissionIssues,calculateCollateralValuation,validateEligibility,validDate} from './collateral.js';
+import {integrationReadiness,analyzeComparableOffers,screenSpatialEvidence,normalizeOcrReview} from './integrations.js';
+import {validateEvidenceInput,validateEvidenceReview,mayReviewEvidence} from './evidence.js';
+
 
 const COOKIE = 'collman_session';
 const JSON_HEADERS = {'content-type':'application/json; charset=utf-8','cache-control':'no-store'};
@@ -147,6 +150,10 @@ async function api(request,env,db){
     });
     return response({ok:true,relogin:true},200,{'set-cookie':sessionCookie('',request,true)});
   }
+  if(path==='/api/integrations'&&request.method==='GET'){
+    guard(['ADMIN','AUDITOR'].includes(actor.role),'Hanya Admin dan Auditor dapat melihat status integrasi.');
+    return response({connectors:integrationReadiness(env),notice:'Status konfigurasi bukan bukti koneksi. ATR/BPN, OCR, AI dan GIS memerlukan kontrak provider, persetujuan pemrosesan data dan UAT langsung.'});
+  }
   if(path==='/api/dashboard'&&request.method==='GET'){
     const stats=await all(db,`SELECT status,COUNT(*) AS total FROM assets WHERE tenant_id=? GROUP BY status`,actor.tenant_id);
     const assets=await row(db,`SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN a.status='APPROVED' AND a.collateral_kind='ASSET' THEN p.market_value ELSE 0 END),0) AS approved_market,
@@ -206,9 +213,12 @@ async function api(request,env,db){
     if(!sub&&request.method==='GET'){
       const appraisal=await row(db,'SELECT * FROM appraisals WHERE tenant_id=? AND asset_id=?',actor.tenant_id,id);
       const comps=await all(db,'SELECT * FROM comparables WHERE tenant_id=? AND asset_id=? ORDER BY created_at DESC',actor.tenant_id,id);
+      const evidence=await all(db,`SELECT e.*,u.display_name AS recorded_by_name,r.display_name AS reviewed_by_name
+        FROM asset_evidence e JOIN users u ON u.id=e.recorded_by LEFT JOIN users r ON r.id=e.reviewed_by
+        WHERE e.tenant_id=? AND e.asset_id=? ORDER BY e.created_at DESC LIMIT 100`,actor.tenant_id,id);
       const history=await all(db,`SELECT w.*,u.display_name AS actor_name FROM workflow_history w JOIN users u ON u.id=w.actor_user_id
         WHERE w.tenant_id=? AND w.asset_id=? ORDER BY w.created_at DESC LIMIT 100`,actor.tenant_id,id);
-      return response({asset,appraisal:appraisal?{...appraisal,risk_flags:JSON.parse(appraisal.risk_flags_json)}:null,comparables:comps,history});
+      return response({asset,appraisal:appraisal?{...appraisal,risk_flags:JSON.parse(appraisal.risk_flags_json)}:null,comparables:comps,history,evidence});
     }
     if(!sub&&request.method==='PUT'){
       guard(canEditAsset(actor,asset),'Hanya Maker pemilik tugas dapat mengedit Draft atau Returned.');
@@ -228,6 +238,58 @@ async function api(request,env,db){
         await audit(tx,actor,'ASSET',id,'UPDATE');
       });
       return response({ok:true});
+    }
+    if(sub==='evidence'&&request.method==='GET'){
+      const records=await all(db,`SELECT e.*,u.display_name AS recorded_by_name,r.display_name AS reviewed_by_name
+        FROM asset_evidence e JOIN users u ON u.id=e.recorded_by LEFT JOIN users r ON r.id=e.reviewed_by
+        WHERE e.tenant_id=? AND e.asset_id=? ORDER BY e.created_at DESC LIMIT 100`,actor.tenant_id,id);
+      return response({records});
+    }
+    if(sub==='evidence'&&request.method==='POST'){
+      guard(canEditAsset(actor,asset),'Bukti hanya boleh dicatat oleh Maker/Admin pada Draft atau Returned.');
+      const payload=validateEvidenceInput(await readBody(request)),evidenceId=uuid();
+      await db.transaction(async tx=>{
+        await lockEditableAsset(tx,actor,id);
+        await run(tx,`INSERT INTO asset_evidence
+         (id,tenant_id,asset_id,evidence_type,source_name,reference_no,notes,digest_sha256,recorded_by)
+         VALUES (?,?,?,?,?,?,?,?,?)`,evidenceId,actor.tenant_id,id,payload.evidence_type,
+          payload.source_name,payload.reference_no,payload.notes,payload.digest_sha256,actor.id);
+        await audit(tx,actor,'ASSET_EVIDENCE',evidenceId,'ADD_EVIDENCE',{asset_id:id,evidence_type:payload.evidence_type});
+      });
+      return response({id:evidenceId,review_status:'PENDING_REVIEW'},201);
+    }
+    const evidenceReview=sub.match(/^evidence\/([^/]+)\/review$/);
+    if(evidenceReview&&request.method==='POST'){
+      const payload=validateEvidenceReview(await readBody(request)),eid=evidenceReview[1];
+      await db.transaction(async tx=>{
+        const current=await row(tx,'SELECT * FROM assets WHERE id=? AND tenant_id=? FOR UPDATE',id,actor.tenant_id);
+        guard(current,'Agunan tidak ditemukan.',404);
+        const evidence=await row(tx,'SELECT * FROM asset_evidence WHERE id=? AND tenant_id=? AND asset_id=? FOR UPDATE',eid,actor.tenant_id,id);
+        guard(evidence,'Bukti tidak ditemukan.',404);
+        guard(mayReviewEvidence(actor,current,evidence),'Review bukti tidak diizinkan untuk peran, status atau pembuat ini.');
+        const update=await run(tx,`UPDATE asset_evidence SET review_status=?,reviewed_by=?,review_note=?,
+          reviewed_at=datetime('now') WHERE id=? AND tenant_id=? AND asset_id=? AND review_status='PENDING_REVIEW'`,
+          payload.decision,actor.id,payload.note,eid,actor.tenant_id,id);
+        guard(update.meta.changes===1,'Review sudah diproses.',409);
+        await audit(tx,actor,'ASSET_EVIDENCE',eid,'REVIEW_EVIDENCE',{asset_id:id,decision:payload.decision});
+      });
+      return response({ok:true,status:payload.decision});
+    }
+    if(sub==='offer-analysis'&&request.method==='GET'){
+      const comps=await all(db,'SELECT offering_price,included FROM comparables WHERE tenant_id=? AND asset_id=?',actor.tenant_id,id);
+      return response(analyzeComparableOffers(comps));
+    }
+    if(sub==='spatial-screen'&&request.method==='POST'){
+      guard(['ADMIN','MAKER','CHECKER','REVIEWER','APPROVER'].includes(actor.role),'Peran ini tidak dapat mengajukan skrining spasial.');
+      const result=screenSpatialEvidence(await readBody(request));
+      await audit(db,actor,'ASSET',id,'MANUAL_SPATIAL_SCREEN',{source_type:result.source_type,flags:result.flags});
+      return response(result);
+    }
+    if(sub==='ocr-review'&&request.method==='POST'){
+      guard(canEditAsset(actor,asset),'Hanya Maker atau Admin dapat memeriksa usulan OCR pada draft/returned.');
+      const body=await readBody(request),result=normalizeOcrReview(body.fields);
+      await audit(db,actor,'ASSET',id,'OCR_CANDIDATE_REVIEW',{fields:result.suggestions.map(x=>x.field)});
+      return response(result);
     }
     if(sub==='appraisal'&&request.method==='PUT'){
       guard(canEditAsset(actor,asset),'Penilaian hanya dapat diubah pada Draft/Returned oleh Maker.');
@@ -290,6 +352,7 @@ async function api(request,env,db){
     if(sub==='transition'&&request.method==='POST'){
       const data=await readBody(request),action=required(data.action,'Aksi workflow',50),note=safeNote(data.note);
       const next=nextWorkflow(action,asset.status,actor.role,asset.created_by,actor.id);
+
       if(action==='RETURN'||action==='REJECT')guard(note.length>=5,'Alasan minimal 5 karakter diperlukan.');
       await db.transaction(async tx=>{
         const locked=await row(tx,'SELECT * FROM assets WHERE id=? AND tenant_id=? FOR UPDATE',id,actor.tenant_id);
@@ -302,6 +365,16 @@ async function api(request,env,db){
           guard(val&&val.market_value>0,'Nilai penilaian harus diisi sebelum submit / persetujuan.',400);
           if(action==='APPROVE')guard(locked.eligibility_status==='ELIGIBLE'&&locked.security_status==='PERFECTED','Kajian bank harus memenuhi kebijakan dan pengikatan harus selesai.',400);
         }
+      if(action==='APPROVE'){
+        const openEvidence=await row(tx,`SELECT
+          COALESCE(SUM(CASE WHEN review_status='PENDING_REVIEW' THEN 1 ELSE 0 END),0) AS pending,
+          COALESCE(SUM(CASE WHEN review_status='DISPUTED' THEN 1 ELSE 0 END),0) AS disputed
+          FROM asset_evidence WHERE tenant_id=? AND asset_id=?`,actor.tenant_id,id);
+        guard(Number(openEvidence.pending)===0,'Persetujuan ditahan: seluruh bukti tercatat harus direview.');
+        if(Number(openEvidence.disputed)>0)guard(note.length>=20,
+          'Bukti disputed memerlukan alasan pengecualian dari Approver minimal 20 karakter.');
+      }
+
         const update=await tx.prepare(`UPDATE assets SET status=?,updated_at=datetime('now') WHERE id=? AND tenant_id=? AND status=?`).bind(next,id,actor.tenant_id,asset.status).run();
         guard(update.meta.changes===1,'Status berubah. Muat ulang dan coba kembali.',409);
         await tx.prepare('INSERT INTO workflow_history (id,tenant_id,asset_id,action,from_status,to_status,note,actor_user_id) VALUES (?,?,?,?,?,?,?,?)').bind(uuid(),actor.tenant_id,id,action,asset.status,next,note,actor.id).run();
