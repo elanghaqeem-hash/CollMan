@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS task_state (
  CONSTRAINT chk_task_inspection_consistency CHECK (
   (inspection_date IS NULL AND due_date IS NULL)
   OR (inspection_date IS NOT NULL AND due_date IS NOT NULL AND
-      inspection_date ~ '^\\d{4}-\\d{2}-\\d{2}$' AND due_date ~ '^\\d{4}-\\d{2}-\\d{2}$')
+      inspection_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' AND due_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
  )
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_tenant_stage_lane ON task_state(tenant_id,stage_status,lane);
