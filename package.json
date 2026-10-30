@@ -6,7 +6,7 @@
   "description": "Collateral Management System — Vercel Functions and PostgreSQL migration",
   "scripts": {
     "check": "node scripts/check.mjs",
-    "test": "node --test tests/domain.test.mjs tests/frontend-static.test.mjs tests/postgres.test.mjs tests/login-readiness.test.mjs tests/collateral.test.mjs tests/collateral-api.test.mjs tests/integrations.test.mjs tests/evidence.test.mjs tests/valuation-engine.test.mjs tests/enterprise-api.test.mjs tests/task-rules.test.mjs",
+    "test": "node --test tests/domain.test.mjs tests/frontend-static.test.mjs tests/postgres.test.mjs tests/login-readiness.test.mjs tests/collateral-picker.test.mjs tests/collateral.test.mjs tests/collateral-api.test.mjs tests/integrations.test.mjs tests/evidence.test.mjs tests/valuation-engine.test.mjs tests/enterprise-api.test.mjs tests/task-rules.test.mjs",
     "build": "npm run check && npm test",
     "deploy": "node scripts/vercel-deploy.mjs",
     "test:integration": "node --test tests/vercel-api.integration.test.mjs",
