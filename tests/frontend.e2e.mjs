@@ -10,7 +10,7 @@ test('Login readiness on desktop/mobile: missing API, missing DB, retry recovery
   const web=createServer(async(req,res)=>{
     const pathname=new URL(req.url,'http://localhost').pathname;
     const file=pathname==='/'?'index.html':pathname.slice(1);
-    if(!['index.html','app.js','helpers.js','api-client.js','collateral-catalog.js','collateral-ui.js','styles.css'].includes(file)){res.writeHead(404).end();return;}
+    if(!['index.html','app.js','helpers.js','api-client.js','collateral-catalog.js','collateral-ui.js','enterprise-ui.js','styles.css'].includes(file)){res.writeHead(404).end();return;}
     const body=await readFile(new URL('../public/'+file,import.meta.url));
     res.writeHead(200,{'content-type':MIME[file.slice(file.lastIndexOf('.'))]});res.end(body);
   });
@@ -46,7 +46,7 @@ test('CollMan desktop and mobile browser: login, dashboard, register, navigation
     const url=new URL(req.url,'http://localhost');
     if(url.pathname.startsWith('/api/')) return handler(req,res);
     let file=url.pathname==='/'?'index.html':url.pathname.slice(1);
-    if(!['index.html','app.js','helpers.js','api-client.js','collateral-catalog.js','collateral-ui.js','styles.css'].includes(file)){res.writeHead(404).end();return;}
+    if(!['index.html','app.js','helpers.js','api-client.js','collateral-catalog.js','collateral-ui.js','enterprise-ui.js','styles.css'].includes(file)){res.writeHead(404).end();return;}
     const body=await readFile(new URL('../public/'+file,import.meta.url));
     res.writeHead(200,{'content-type':MIME[file.slice(file.lastIndexOf('.'))]||'application/octet-stream'});
     res.end(body);

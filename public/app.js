@@ -1,3 +1,4 @@
+import {facilitiesView,modelsView,modelReviewForm,studioView,modelInputFields,modelRunBasis,readModelRun,exportEnterprise} from './enterprise-ui.js';
 import {GROUPS,METHODS,BUILTIN_TYPES} from './collateral-catalog.js';
 import {universalAssetForm,readAssetForm,changeAssetType,findCollateralTypes,collateralDetail,eligibilityForm,universalAppraisalForm,valuationInputs,catalogView} from './collateral-ui.js';
 import {escapeText, currency, riskLabels, statusText, actionText} from './helpers.js';
@@ -26,7 +27,7 @@ function renderAuth(){
  <button type="submit" class="btn primary">${setup?'Aktivasi Administrator':'Masuk ke CollMan'}</button></form>`:''}
  <div class="auth-powered">Akses terbatas • Sesi 12 jam • Segregation of duties</div></div></div></div>`;
 }
-const NAV=[['dashboard','◫','Dashboard'],['assets','▦','Register Agunan'],['catalog','▧','Kategori Agunan'],['workflow','⇄','Workflow Persetujuan'],['report','▤','Laporan & Analitik'],['audit','◷','Audit Trail'],['settings','⚙','Parameter Risiko'],['users','♙','Manajemen Pengguna'],['integrations','◎','Kesiapan Integrasi']];
+const NAV=[['dashboard','◫','Dashboard'],['assets','▦','Register Agunan'],['catalog','▧','Kategori Agunan'],['facilities','▥','Fasilitas & Alokasi'],['models','◈','Model Registry'],['workflow','⇄','Workflow Persetujuan'],['report','▤','Laporan & Analitik'],['audit','◷','Audit Trail'],['settings','⚙','Parameter Risiko'],['users','♙','Manajemen Pengguna'],['integrations','◎','Kesiapan Integrasi']];
 
 function renderShell(){
  const nav=NAV.filter(([key])=>(!['audit','settings','users'].includes(key)|| (key==='audit'?['ADMIN','AUDITOR'].includes(state.user.role):key==='settings'?true:state.user.role==='ADMIN')) && (key!=='integrations'||['ADMIN','AUDITOR'].includes(state.user.role)));
@@ -36,12 +37,15 @@ function renderShell(){
 }
 function head(label,title,desc,buttons=''){return `<div class="pagehead"><div><div class="eyebrow">${esc(label)}</div><h1>${esc(title)}</h1><p>${esc(desc)}</p></div><div class="actions">${buttons}</div></div>`;}
 function renderContent(){const el=document.getElementById('page');if(!el)return;if(state.busy){el.innerHTML='<div class="card">Memuat data…</div>';return;}
- switch(state.view){case 'catalog':el.innerHTML=head('MASTER AGUNAN','Kategori & Kebijakan Agunan','Kelola jenis agunan lintas aset sesuai kebijakan institusi.')+catalogView(state.catalog,state.user);break;case 'dashboard':el.innerHTML=dashboard();break;case 'assets':el.innerHTML=assets();break;case 'asset':el.innerHTML=assetDetail();break;case 'assetform':el.innerHTML=assetForm();break;case 'workflow':el.innerHTML=workflow();break;case 'report':el.innerHTML=report();break;case 'settings':el.innerHTML=settings();break;case 'users':el.innerHTML=users();break;case 'audit':el.innerHTML=audit();break;case 'integrations':el.innerHTML=integrationsView();break;case 'password':el.innerHTML=passwordForm();break;default:el.innerHTML=empty('Tidak ditemukan','Pilih menu di samping.');}}
+ switch(state.view){case 'facilities':el.innerHTML=facilitiesView(state);break;case 'models':el.innerHTML=modelsView(state);break;case 'catalog':el.innerHTML=head('MASTER AGUNAN','Kategori & Kebijakan Agunan','Kelola jenis agunan lintas aset sesuai kebijakan institusi.')+catalogView(state.catalog,state.user);break;case 'dashboard':el.innerHTML=dashboard();break;case 'assets':el.innerHTML=assets();break;case 'asset':el.innerHTML=assetDetail();break;case 'assetform':el.innerHTML=assetForm();break;case 'workflow':el.innerHTML=workflow();break;case 'report':el.innerHTML=report();break;case 'settings':el.innerHTML=settings();break;case 'users':el.innerHTML=users();break;case 'audit':el.innerHTML=audit();break;case 'integrations':el.innerHTML=integrationsView();break;case 'password':el.innerHTML=passwordForm();break;default:el.innerHTML=empty('Tidak ditemukan','Pilih menu di samping.');}}
 
 async function loadView(){
  state.busy=true;renderShell();document.getElementById('page').innerHTML=`<div class="card">Memuat data…</div>`;
  try{
   if(!state.catalog||state.view==='catalog')state.catalog=await api('/api/collateral-catalog');
+  if(state.view==='facilities'){state.facilities=await api('/api/facilities?q='+encodeURIComponent(state.facilityQuery||''));state.allocations=await api('/api/allocations');state.approvedAssets=await api('/api/assets?status=APPROVED');}
+  if(state.view==='models'||state.view==='asset')state.models=await api('/api/models');
+  if(state.view==='asset'&&state.detail?.asset?.id)state.modelRuns=await api('/api/assets/'+state.detail.asset.id+'/model-runs');
   if(state.view==='dashboard'||state.view==='report')state.dashboard=await api('/api/dashboard');
   if(state.view==='assets'||state.view==='workflow')state.list=await api('/api/assets'+(state.view==='assets'?`?q=${encodeURIComponent(state.search)}&status=${encodeURIComponent(state.status)}&category=${encodeURIComponent(state.category)}`:''));
   if(state.view==='asset'&&state.detail?.asset?.id)state.detail=await api(`/api/assets/${state.detail.asset.id}`);
@@ -88,7 +92,7 @@ function assetDetail(){const d=state.detail;if(!d)return empty('Agunan belum dip
  return head('DETAIL AGUNAN',a.reference_no,`${a.borrower} • ${a.asset_type}`,
  btn('back-assets','← Daftar Agunan')+(canEdit?btn('edit-asset','✎ Perbarui Data','primary'):''))+
  `<section class="card"><div class="card-head"><div><h2>Identitas & Legalitas Agunan</h2><p>${esc(a.address)}</p></div>${badge(a.status)}</div><div class="info-grid">${fields.map(([k,val])=>`<div><div class="key">${esc(k)}</div><div class="value">${esc(String(val))}</div></div>`).join('')}</div>${a.notes?`<div class="divider"></div><div class="small muted">Catatan: ${esc(a.notes)}</div>`:''}</section>
- ${collateralDetail(a,state.catalog?.types)}${eligibilityForm(a,state.user)}
+ ${collateralDetail(a,state.catalog?.types)}${eligibilityForm(a,state.user)}${studioView(state)}
  <section class="card"><div class="card-head"><div><h2>Hasil Penilaian & Quick Appraisal</h2><p>${a.collateral_kind==='GUARANTEE'?'Nilai penjaminan dan nilai setelah haircut; terpisah dari agunan kebendaan':'Nilai penilaian, haircut dan indikasi nilai likuidasi'}</p></div>${canEdit?btn('edit-appraisal',v?'Ubah Penilaian':'+ Tambah Penilaian','small'):''}</div>
  ${v?`<div class="metrics" style="margin-bottom:0;grid-template-columns:repeat(3,minmax(0,1fr))"><div class="kpi-mini"><div class="small muted">Nilai penilaian</div><span class="val">${money(v.market_value)}</span></div><div class="kpi-mini"><div class="small muted">Total haircut</div><span class="val">${v.total_haircut_pct}%</span><div class="small muted">Dasar ${v.base_haircut_pct}% + risiko ${v.risk_haircut_pct}%</div></div><div class="kpi-mini"><div class="small muted">Indikasi likuidasi</div><span class="val">${money(v.liquidation_value)}</span></div></div><div class="section-label">Faktor risiko yang ditandai</div><div class="legend">${Object.entries(riskLabels).filter(([k])=>v.risk_flags[k]).map(([k,l])=>`<span class="pill RETURNED">! ${esc(l)}</span>`).join('')||'<span class="muted">Belum ada bendera risiko ditandai</span>'}</div><p class="field-note" style="margin:15px 0 0">Metode: ${esc(METHODS[v.valuation_method]||v.valuation_method||'Nilai pasar hasil penilai')}. Referensi: ${esc(v.valuation_reference||'Data historis')}. Tanggal penilaian: ${esc(v.valuation_date)}. ${esc(v.notes||'')} Nilai bersifat indikatif, menunggu validasi penilai berwenang.</p>`:empty('Penilaian belum tersedia','Isi nilai penilaian dan parameter haircut sebelum mengirim untuk review.')}</section>
  <section class="card"><div class="card-head"><div><h2>Register Bukti Agunan & Review</h2>
@@ -154,6 +158,17 @@ function comparableForm(){return `<form id="comparable-form" class="card"><div c
 function formObj(form){return Object.fromEntries(new FormData(form).entries());}
 async function onSubmit(event){const form=event.target;if(!form.id)return;event.preventDefault();const b=form.querySelector('[type="submit"]');if(b)b.disabled=true;
  try{
+  if(['facility-form','allocation-form','model-form','model-run-form','model-review-form','facility-search'].includes(form.id)){
+   let path,body=formObj(form);
+   if(form.id==='facility-search'){state.facilityQuery=body.facility_query;await loadView();return;}
+   if(form.id==='facility-form')path='/api/facilities';
+   if(form.id==='allocation-form')path='/api/allocations';
+   if(form.id==='model-form'){path='/api/models';body.parameters={max_source_age_days:body.max_source_age_days,min_comparables:body.min_comparables};}
+   if(form.id==='model-run-form'){path='/api/assets/'+state.detail.asset.id+'/model-runs';body=readModelRun(form,state.models.records);}
+   if(form.id==='model-review-form'){path='/api/models/'+form.dataset.id+'/review';const model=state.models.records.find(m=>m.id===form.dataset.id);body.observations=[0,1,2].map(i=>({category:model.category,region:model.region,predicted:body['predicted_'+i],actual:body['actual_'+i],realized_on:body['realized_on_'+i],realization_ref:body['realization_ref_'+i]}));}
+   await api(path,{method:'POST',body});await loadView();notify('Data tersimpan.');return;
+  }
+
   if(form.id==='auth-form'){
    const data=formObj(form);if(state.needSetup){await api('/api/auth/bootstrap',{method:'POST',body:data});state.needSetup=false;notify('Administrator berhasil dibuat. Silakan login.');renderAuth();}
    else{await api('/api/auth/login',{method:'POST',body:data});await init();}
@@ -208,6 +223,23 @@ function renderCollateralSearch(input){
  results.hidden=false;
 }
 async function onClick(event){const nav=event.target.closest('[data-nav]');if(nav){await navigate(nav.dataset.nav);return;}
+ const enterprise=event.target.closest('[data-enterprise]');
+ if(enterprise){
+  const action=enterprise.dataset.enterprise,id=enterprise.dataset.id;
+  if(action==='export-facilities'){exportEnterprise('collman-facilities',state.facilities?.records||[]);return;}
+  if(action==='export-models'){exportEnterprise('collman-model-registry',state.models?.records||[]);return;}
+  if(action==='review-model'){document.getElementById('model-review-container').innerHTML=modelReviewForm(id);document.getElementById('model-review-container').scrollIntoView();return;}
+  const message=action==='exposure'?'Exposure baru dalam IDR:':'Referensi keputusan / alasan tindakan:';
+  const value=window.prompt(message);if(value===null)return;
+  try{
+   let path,method='POST',body={reason:value,reference:value};
+   if(action==='exposure'){path='/api/facilities/'+id;method='PUT';body={exposure_idr:value};}
+   if(action==='approve-model'||action==='suspend-model')path='/api/models/'+id+'/'+(action==='approve-model'?'approve':'suspend');
+   if(action==='approve-allocation'||action==='reject-allocation')path='/api/allocations/'+id+'/'+(action==='approve-allocation'?'approve':'reject');
+   if(action==='request-release'||action==='approve-release')path='/api/allocations/'+id+'/'+action;
+   await api(path,{method,body});await loadView();notify('Keputusan tercatat.');
+  }catch(e){notify(e.message,true);}return;
+ }
  const open=event.target.closest('[data-open]');if(open){state.detail={asset:{id:open.dataset.open}};await navigate('asset');return;}
  const selectedType=event.target.closest('[data-search-type]');
  if(selectedType){
@@ -268,6 +300,7 @@ async function onClick(event){const nav=event.target.closest('[data-nav]');if(na
 }
 document.addEventListener('change',event=>{
  const form=event.target.closest('form');
+ if(form?.id==='model-run-form'&&event.target.name==='model_id'){const model=state.models.records.find(m=>m.id===event.target.value);document.getElementById('model-run-inputs').innerHTML=modelInputFields(model.method);document.getElementById('model-run-basis').innerHTML=modelRunBasis(model.method);}
  if(form?.id==='asset-form'&&['category-select','asset_type'].includes(event.target.id))changeAssetType(form,state.catalog.types,event.target.id==='category-select');
  if(form?.id==='appraisal-form'&&event.target.name==='valuation_method')document.getElementById('valuation-inputs').innerHTML=valuationInputs(event.target.value,{},state.detail.asset.currency_code||'IDR');
  if(form?.id==='catalog-policy-form'&&event.target.name==='code'){const type=state.catalog.types.find(t=>t.code===event.target.value);form.elements.policy.value=type.policy;form.elements.enabled.checked=type.enabled;}

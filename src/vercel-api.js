@@ -5,6 +5,8 @@ import {catalogTypes,GROUPS,POLICIES} from '../public/collateral-catalog.js';
 import {validateCollateralAsset as validateAsset,validateCatalog,submissionIssues,calculateCollateralValuation,validateEligibility,validDate} from './collateral.js';
 import {integrationReadiness,analyzeComparableOffers,screenSpatialEvidence,normalizeOcrReview} from './integrations.js';
 import {validateEvidenceInput,validateEvidenceReview,mayReviewEvidence} from './evidence.js';
+import {enterpriseRoutes} from './enterprise-api.js';
+import {numeric} from './valuation-engine.js';
 
 
 const COOKIE = 'collman_session';
@@ -137,6 +139,8 @@ async function api(request,env,db){
   if(publicResult)return publicResult;
   const actor=await getActor(request,db);
   guard(actor,'Sesi tidak valid atau kedaluwarsa.',401);
+  const enterprise=await enterpriseRoutes(request,db,actor,{readBody,audit});
+  if(enterprise)return enterprise;
   if(path==='/api/auth/password' && request.method==='POST'){
     const body=await readBody(request),password=strongPassword(body.new_password);
     await db.transaction(async tx=>{
@@ -303,7 +307,7 @@ async function api(request,env,db){
         await run(tx,`INSERT INTO appraisals (id,tenant_id,asset_id,market_value,base_haircut_pct,risk_haircut_pct,total_haircut_pct,liquidation_value,risk_flags_json,valuation_date,notes,updated_by,valuation_method,valuation_inputs,valuation_reference)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(asset_id) DO UPDATE SET market_value=excluded.market_value,base_haircut_pct=excluded.base_haircut_pct,
       risk_haircut_pct=excluded.risk_haircut_pct,total_haircut_pct=excluded.total_haircut_pct,liquidation_value=excluded.liquidation_value,
-      valuation_method=excluded.valuation_method,valuation_inputs=excluded.valuation_inputs,valuation_reference=excluded.valuation_reference,
+      valuation_method=excluded.valuation_method,valuation_inputs=excluded.valuation_inputs,valuation_reference=excluded.valuation_reference,bank_accepted_value=NULL,bank_policy_ref=NULL,
       risk_flags_json=excluded.risk_flags_json,valuation_date=excluded.valuation_date,notes=excluded.notes,updated_by=excluded.updated_by,updated_at=datetime('now')`,
       uuid(),actor.tenant_id,id,calc.market_value,calc.base_haircut_pct,calc.risk_haircut_pct,calc.total_haircut_pct,calc.liquidation_value,JSON.stringify(calc.risk_flags),date,notes,actor.id,calc.valuation_method,JSON.stringify(calc.valuation_inputs),calc.valuation_reference);
         await run(tx,'UPDATE assets SET eligibility_status=\'PENDING\',eligibility_notes=\'\',updated_at=datetime(\'now\') WHERE id=? AND tenant_id=?',id,actor.tenant_id);
@@ -340,10 +344,19 @@ async function api(request,env,db){
     }
     if(sub==='eligibility'&&request.method==='PUT'){
       guard(['ADMIN','CHECKER','REVIEWER','APPROVER'].includes(actor.role)&&actor.id!==asset.created_by,'Kajian bank harus dilakukan pejabat berbeda dari Maker.');
-      const decision=validateEligibility(await readBody(request));
+      const payload=await readBody(request),decision=validateEligibility(payload);
       await db.transaction(async tx=>{
         const current=await row(tx,'SELECT status FROM assets WHERE id=? AND tenant_id=? FOR UPDATE',id,actor.tenant_id);
         guard(['SUBMITTED','REVIEWED','RECOMMENDED'].includes(current?.status),'Kajian hanya tersedia saat proses review.',409);
+        if(payload.bank_accepted_value!==undefined&&payload.bank_accepted_value!==''){
+          const amount=numeric(payload.bank_accepted_value,'Nilai diterima bank');
+          guard(Number.isSafeInteger(amount),'Nilai bank harus rupiah bulat.',400);
+          const appraisal=await row(tx,'SELECT liquidation_value FROM appraisals WHERE tenant_id=? AND asset_id=?',actor.tenant_id,id);
+          guard(appraisal&&amount<=appraisal.liquidation_value,'Nilai bank melebihi estimasi likuidasi / appraisal belum tersedia.',400);
+          const policy=required(payload.bank_policy_ref,'Referensi kebijakan nilai bank',500);
+          await run(tx,'UPDATE appraisals SET bank_accepted_value=?,bank_policy_ref=? WHERE tenant_id=? AND asset_id=?',amount,policy,actor.tenant_id,id);
+          decision.bank_accepted_value=amount;decision.bank_policy_ref=policy;
+        }
         await run(tx,"UPDATE assets SET eligibility_status=?,eligibility_notes=?,updated_at=datetime('now') WHERE id=? AND tenant_id=?",decision.eligibility_status,decision.eligibility_notes,id,actor.tenant_id);
         await audit(tx,actor,'ASSET',id,'ASSESS_ELIGIBILITY',decision);
       });
@@ -357,6 +370,11 @@ async function api(request,env,db){
       await db.transaction(async tx=>{
         const locked=await row(tx,'SELECT * FROM assets WHERE id=? AND tenant_id=? FOR UPDATE',id,actor.tenant_id);
         guard(locked&&locked.status===asset.status,'Status berubah. Muat ulang dan coba kembali.',409);
+        if(['RECOMMEND','APPROVE','REJECT'].includes(action)){
+          const previous=await row(tx,"SELECT COUNT(*) AS total FROM workflow_history WHERE tenant_id=? AND asset_id=? AND actor_user_id=? AND action IN ('CHECK','RECOMMEND')",actor.tenant_id,id,actor.id);
+          guard(Number(previous.total)===0,'Pejabat tahap review dan persetujuan wajib independen.');
+          guard(actor.id!==locked.created_by,'Maker tidak dapat memutuskan hasil agunannya sendiri.');
+        }
         if(action==='SUBMIT'||action==='APPROVE'){
           if(action==='SUBMIT')guard(actor.role==='ADMIN'||locked.created_by===actor.id,'Hanya pemilik tugas dapat mengirim agunan.');
           const issues=submissionIssues(locked,(await tenantCatalog(tx,actor.tenant_id)).types);

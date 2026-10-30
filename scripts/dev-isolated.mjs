@@ -12,7 +12,7 @@ await handleCollManApi(setup,env,db);
 const qaToken=randomBytes(32).toString('hex');
 const qaUser=await db.prepare('SELECT id FROM users WHERE email=?').bind('admin@test.invalid').first();
 await db.prepare("INSERT INTO sessions(token_hash,user_id,expires_at) VALUES (?,?,datetime('now','+12 hours'))").bind(createHash('sha256').update(qaToken).digest('hex'),qaUser.id).run();
-const files=new Set(['index.html','app.js','styles.css','helpers.js','api-client.js','collateral-catalog.js','collateral-ui.js']);
+const files=new Set(['index.html','app.js','styles.css','helpers.js','api-client.js','collateral-catalog.js','collateral-ui.js','enterprise-ui.js']);
 const server=createServer(async(req,res)=>{
  try{
   const origin=(req.headers['x-forwarded-proto']?.split(',')[0]||'http')+'://'+req.headers.host,url=new URL(req.url,origin);
