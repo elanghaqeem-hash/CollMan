@@ -52,3 +52,21 @@ test('bootstrap confidence is deterministic, descriptive and only estimated with
  assert.deepEqual(r.confidence_interval,backtest(obs).confidence_interval);
  assert.ok(r.confidence_interval.mape_pct[0]<=r.mape_pct&&r.confidence_interval.mape_pct[1]>=r.mape_pct);
 });
+
+test('historical backtesting rejects future outcomes and records incomplete prediction provenance',()=>{
+ const actualDate='2026-10-01',base={predicted:100,actual:90,realized_on:actualDate,realization_ref:'Synthetic A'};
+ const incomplete=backtest([base,{...base,realization_ref:'Synthetic B',actual:110}]);
+ assert.equal(incomplete.historical_prediction_evidence,'INCOMPLETE');
+ assert.equal(incomplete.documented_predictions,0);
+ assert.deepEqual(incomplete.observation_period,{from:actualDate,to:actualDate});
+ const complete=backtest([{...base,predicted_on:'2026-09-01',prediction_ref:'Synthetic archived prediction A'},
+   {...base,actual:110,realization_ref:'Synthetic B',predicted_on:'2026-09-02',prediction_ref:'Synthetic archived prediction B'}]);
+ assert.equal(complete.historical_prediction_evidence,'COMPLETE');
+ assert.equal(complete.documented_predictions,2);
+ assert.throws(()=>backtest([{...base,predicted_on:'2026-10-02',prediction_ref:'Synthetic invalid future forecast'},
+   {...base,realization_ref:'Synthetic B'}]),/Prediksi tidak boleh dibuat setelah realisasi/);
+ const tomorrow=new Date(Date.now()+3*86400000).toISOString().slice(0,10);
+ assert.throws(()=>backtest([{...base,realized_on:tomorrow},{...base,realization_ref:'Synthetic B'}]),/Tanggal realisasi belum terjadi/);
+ assert.throws(()=>backtest([{...base,predicted_on:'2026-09-01'},
+   {...base,realization_ref:'Synthetic B'}]),/Referensi prediksi historis/);
+});
