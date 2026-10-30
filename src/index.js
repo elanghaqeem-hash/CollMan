@@ -1,5 +1,7 @@
 import {DurableObject} from 'cloudflare:workers';
 import {INITIAL_SCHEMA} from './schema.js';
+import {EVIDENCE_SCHEMA} from './evidence-schema.js';
+import {validateEvidenceInput,validateEvidenceReview,mayReviewEvidence} from './evidence.js';
 import {integrationReadiness,analyzeComparableOffers,screenSpatialEvidence,normalizeOcrReview} from './integrations.js';
 import {ROLES, RISK_FLAGS, STATUS_LABELS, ACTIONS, validateAsset, calculateValuation, nextWorkflow, numberIn, required, optional, problem} from './domain.js';
 
@@ -165,9 +167,12 @@ async function api(request,env,db){
     if(!sub&&request.method==='GET'){
       const appraisal=await row(db,'SELECT * FROM appraisals WHERE tenant_id=? AND asset_id=?',actor.tenant_id,id);
       const comps=await all(db,'SELECT * FROM comparables WHERE tenant_id=? AND asset_id=? ORDER BY created_at DESC',actor.tenant_id,id);
+      const evidence=await all(db,`SELECT e.*,u.display_name AS recorded_by_name,r.display_name AS reviewed_by_name
+        FROM asset_evidence e JOIN users u ON u.id=e.recorded_by LEFT JOIN users r ON r.id=e.reviewed_by
+        WHERE e.tenant_id=? AND e.asset_id=? ORDER BY e.created_at DESC LIMIT 100`,actor.tenant_id,id);
       const history=await all(db,`SELECT w.*,u.display_name AS actor_name FROM workflow_history w JOIN users u ON u.id=w.actor_user_id
         WHERE w.tenant_id=? AND w.asset_id=? ORDER BY w.created_at DESC LIMIT 100`,actor.tenant_id,id);
-      return response({asset,appraisal:appraisal?{...appraisal,risk_flags:JSON.parse(appraisal.risk_flags_json)}:null,comparables:comps,history});
+      return response({asset,appraisal:appraisal?{...appraisal,risk_flags:JSON.parse(appraisal.risk_flags_json)}:null,comparables:comps,history,evidence});
     }
     if(!sub&&request.method==='PUT'){
       guard(canEditAsset(actor,asset),'Hanya Maker pemilik tugas dapat mengedit Draft atau Returned.');
@@ -175,6 +180,48 @@ async function api(request,env,db){
       await run(db,`UPDATE assets SET borrower=?,asset_type=?,address=?,certificate_type=?,certificate_no=?,nib=?,ownership_name=?,land_area=?,building_area=?,legal_status=?,notes=?,updated_at=datetime('now')
         WHERE id=? AND tenant_id=?`,data.borrower,data.asset_type,data.address,data.certificate_type,data.certificate_no,data.nib,data.ownership_name,data.land_area,data.building_area,data.legal_status,data.notes,id,actor.tenant_id);
       await audit(db,actor,'ASSET',id,'UPDATE');return response({ok:true});
+    }
+    if(sub==='evidence'&&request.method==='GET'){
+      const records=await all(db,`SELECT e.*,u.display_name AS recorded_by_name,r.display_name AS reviewed_by_name
+        FROM asset_evidence e JOIN users u ON u.id=e.recorded_by LEFT JOIN users r ON r.id=e.reviewed_by
+        WHERE e.tenant_id=? AND e.asset_id=? ORDER BY e.created_at DESC LIMIT 100`,actor.tenant_id,id);
+      return response({records});
+    }
+    if(sub==='evidence'&&request.method==='POST'){
+      guard(canEditAsset(actor,asset),'Bukti hanya boleh dicatat oleh Maker/Admin pada Draft atau Returned.');
+      const payload=validateEvidenceInput(await readBody(request)),evidenceId=uuid();
+      db.transaction(()=>{
+        const current=db.prepare('SELECT status,created_by FROM assets WHERE id=? AND tenant_id=?').bind(id,actor.tenant_id).execute().toArray()[0];
+        guard(current&&canEditAsset(actor,current),'Status berubah atau tidak berwenang.',409);
+        db.prepare(`INSERT INTO asset_evidence
+         (id,tenant_id,asset_id,evidence_type,source_name,reference_no,notes,digest_sha256,recorded_by)
+         VALUES (?,?,?,?,?,?,?,?,?)`).bind(evidenceId,actor.tenant_id,id,payload.evidence_type,
+          payload.source_name,payload.reference_no,payload.notes,payload.digest_sha256,actor.id).runSync();
+        db.prepare('INSERT INTO audit_log (id,tenant_id,entity_type,entity_id,action,actor_user_id,detail_json) VALUES (?,?,?,?,?,?,?)')
+          .bind(uuid(),actor.tenant_id,'ASSET_EVIDENCE',evidenceId,'ADD_EVIDENCE',actor.id,
+            JSON.stringify({asset_id:id,evidence_type:payload.evidence_type})).runSync();
+      });
+      return response({id:evidenceId,review_status:'PENDING_REVIEW'},201);
+    }
+    const evidenceReview=sub.match(/^evidence\/([^/]+)\/review$/);
+    if(evidenceReview&&request.method==='POST'){
+      const payload=validateEvidenceReview(await readBody(request)),eid=evidenceReview[1];
+      db.transaction(()=>{
+        const current=db.prepare('SELECT * FROM assets WHERE id=? AND tenant_id=?').bind(id,actor.tenant_id).execute().toArray()[0];
+        guard(current,'Agunan tidak ditemukan.',404);
+        const evidence=db.prepare('SELECT * FROM asset_evidence WHERE id=? AND tenant_id=? AND asset_id=?')
+          .bind(eid,actor.tenant_id,id).execute().toArray()[0];
+        guard(evidence,'Bukti tidak ditemukan.',404);
+        guard(mayReviewEvidence(actor,current,evidence),'Review bukti tidak diizinkan untuk peran, status atau pembuat ini.');
+        const updated=db.prepare(`UPDATE asset_evidence SET review_status=?,reviewed_by=?,review_note=?,
+          reviewed_at=datetime('now') WHERE id=? AND tenant_id=? AND asset_id=? AND review_status='PENDING_REVIEW'`)
+          .bind(payload.decision,actor.id,payload.note,eid,actor.tenant_id,id).runSync();
+        guard(updated.meta.changes===1,'Review sudah diproses.',409);
+        db.prepare('INSERT INTO audit_log (id,tenant_id,entity_type,entity_id,action,actor_user_id,detail_json) VALUES (?,?,?,?,?,?,?)')
+          .bind(uuid(),actor.tenant_id,'ASSET_EVIDENCE',eid,'REVIEW_EVIDENCE',actor.id,
+            JSON.stringify({asset_id:id,decision:payload.decision})).runSync();
+      });
+      return response({ok:true,status:payload.decision});
     }
     if(sub==='offer-analysis'&&request.method==='GET'){
       const comps=await all(db,'SELECT offering_price,included FROM comparables WHERE tenant_id=? AND asset_id=?',actor.tenant_id,id);
@@ -332,6 +379,7 @@ export class CollManStore extends DurableObject {
     this.database=new SQLiteAdapter(ctx.storage);
     ctx.blockConcurrencyWhile(async()=>{
       this.ctx.storage.sql.exec(INITIAL_SCHEMA);
+      this.ctx.storage.sql.exec(EVIDENCE_SCHEMA);
     });
   }
   async fetch(request){
