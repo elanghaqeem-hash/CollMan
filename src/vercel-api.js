@@ -1,6 +1,7 @@
 /** Vercel runtime adapter of the Cloudflare business API. Cloudflare source remains untouched. */
 import {ROLES, RISK_FLAGS, STATUS_LABELS, ACTIONS, validateAsset, calculateValuation, nextWorkflow, numberIn, required, optional, problem} from './domain.js';
 import {integrationReadiness,analyzeComparableOffers,screenSpatialEvidence,normalizeOcrReview} from './integrations.js';
+import {validateEvidenceInput,validateEvidenceReview,mayReviewEvidence} from './evidence.js';
 
 const COOKIE = 'collman_session';
 const JSON_HEADERS = {'content-type':'application/json; charset=utf-8','cache-control':'no-store'};
@@ -180,9 +181,12 @@ async function api(request,env,db){
     if(!sub&&request.method==='GET'){
       const appraisal=await row(db,'SELECT * FROM appraisals WHERE tenant_id=? AND asset_id=?',actor.tenant_id,id);
       const comps=await all(db,'SELECT * FROM comparables WHERE tenant_id=? AND asset_id=? ORDER BY created_at DESC',actor.tenant_id,id);
+      const evidence=await all(db,`SELECT e.*,u.display_name AS recorded_by_name,r.display_name AS reviewed_by_name
+        FROM asset_evidence e JOIN users u ON u.id=e.recorded_by LEFT JOIN users r ON r.id=e.reviewed_by
+        WHERE e.tenant_id=? AND e.asset_id=? ORDER BY e.created_at DESC LIMIT 100`,actor.tenant_id,id);
       const history=await all(db,`SELECT w.*,u.display_name AS actor_name FROM workflow_history w JOIN users u ON u.id=w.actor_user_id
         WHERE w.tenant_id=? AND w.asset_id=? ORDER BY w.created_at DESC LIMIT 100`,actor.tenant_id,id);
-      return response({asset,appraisal:appraisal?{...appraisal,risk_flags:JSON.parse(appraisal.risk_flags_json)}:null,comparables:comps,history});
+      return response({asset,appraisal:appraisal?{...appraisal,risk_flags:JSON.parse(appraisal.risk_flags_json)}:null,comparables:comps,history,evidence});
     }
     if(!sub&&request.method==='PUT'){
       guard(canEditAsset(actor,asset),'Hanya Maker pemilik tugas dapat mengedit Draft atau Returned.');
@@ -195,6 +199,42 @@ async function api(request,env,db){
         await audit(tx,actor,'ASSET',id,'UPDATE');
       });
       return response({ok:true});
+    }
+    if(sub==='evidence'&&request.method==='GET'){
+      const records=await all(db,`SELECT e.*,u.display_name AS recorded_by_name,r.display_name AS reviewed_by_name
+        FROM asset_evidence e JOIN users u ON u.id=e.recorded_by LEFT JOIN users r ON r.id=e.reviewed_by
+        WHERE e.tenant_id=? AND e.asset_id=? ORDER BY e.created_at DESC LIMIT 100`,actor.tenant_id,id);
+      return response({records});
+    }
+    if(sub==='evidence'&&request.method==='POST'){
+      guard(canEditAsset(actor,asset),'Bukti hanya boleh dicatat oleh Maker/Admin pada Draft atau Returned.');
+      const payload=validateEvidenceInput(await readBody(request)),evidenceId=uuid();
+      await db.transaction(async tx=>{
+        await lockEditableAsset(tx,actor,id);
+        await run(tx,`INSERT INTO asset_evidence
+         (id,tenant_id,asset_id,evidence_type,source_name,reference_no,notes,digest_sha256,recorded_by)
+         VALUES (?,?,?,?,?,?,?,?,?)`,evidenceId,actor.tenant_id,id,payload.evidence_type,
+          payload.source_name,payload.reference_no,payload.notes,payload.digest_sha256,actor.id);
+        await audit(tx,actor,'ASSET_EVIDENCE',evidenceId,'ADD_EVIDENCE',{asset_id:id,evidence_type:payload.evidence_type});
+      });
+      return response({id:evidenceId,review_status:'PENDING_REVIEW'},201);
+    }
+    const evidenceReview=sub.match(/^evidence\/([^/]+)\/review$/);
+    if(evidenceReview&&request.method==='POST'){
+      const payload=validateEvidenceReview(await readBody(request)),eid=evidenceReview[1];
+      await db.transaction(async tx=>{
+        const current=await row(tx,'SELECT * FROM assets WHERE id=? AND tenant_id=? FOR UPDATE',id,actor.tenant_id);
+        guard(current,'Agunan tidak ditemukan.',404);
+        const evidence=await row(tx,'SELECT * FROM asset_evidence WHERE id=? AND tenant_id=? AND asset_id=? FOR UPDATE',eid,actor.tenant_id,id);
+        guard(evidence,'Bukti tidak ditemukan.',404);
+        guard(mayReviewEvidence(actor,current,evidence),'Review bukti tidak diizinkan untuk peran, status atau pembuat ini.');
+        const update=await run(tx,`UPDATE asset_evidence SET review_status=?,reviewed_by=?,review_note=?,
+          reviewed_at=datetime('now') WHERE id=? AND tenant_id=? AND asset_id=? AND review_status='PENDING_REVIEW'`,
+          payload.decision,actor.id,payload.note,eid,actor.tenant_id,id);
+        guard(update.meta.changes===1,'Review sudah diproses.',409);
+        await audit(tx,actor,'ASSET_EVIDENCE',eid,'REVIEW_EVIDENCE',{asset_id:id,decision:payload.decision});
+      });
+      return response({ok:true,status:payload.decision});
     }
     if(sub==='offer-analysis'&&request.method==='GET'){
       const comps=await all(db,'SELECT offering_price,included FROM comparables WHERE tenant_id=? AND asset_id=?',actor.tenant_id,id);
