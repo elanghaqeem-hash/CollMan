@@ -1,0 +1,93 @@
+name: CollMan DBA — controlled inventory and recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'inventory = metadata-only; backup-restore = snapshot source to empty independent Prisma Postgres DB'
+        required: true
+        type: choice
+        options:
+          - inventory
+          - backup-restore
+      change_ticket:
+        description: 'Approved change/incident identifier; do not include credentials or borrower data'
+        required: true
+        type: string
+      approved_source_id:
+        description: 'For backup-restore: source_id from the preceding inventory run'
+        required: false
+        type: string
+      confirm_disposable_restore:
+        description: 'I confirm the restore target is a separately provisioned EMPTY disposable database'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: collman-dba-recovery
+  cancel-in-progress: false
+
+jobs:
+  recovery:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: collman-dba
+    container:
+      # Prisma Postgres runs PostgreSQL 17; use matching pg_dump / pg_restore.
+      image: postgres:17
+    env:
+      COLLMAN_DBA_SOURCE_DIRECT_URL: ${{ secrets.COLLMAN_DBA_SOURCE_DIRECT_URL }}
+      COLLMAN_DBA_RESTORE_DIRECT_URL: ${{ secrets.COLLMAN_DBA_RESTORE_DIRECT_URL }}
+      COLLMAN_DBA_APPROVED_SOURCE_ID: ${{ inputs.approved_source_id }}
+      COLLMAN_DBA_ACK_RESTORE_EMPTY: ${{ inputs.confirm_disposable_restore }}
+      COLLMAN_DBA_CHANGE_TICKET: ${{ inputs.change_ticket }}
+      COLLMAN_DBA_OPERATION: ${{ inputs.operation }}
+      COLLMAN_DBA_REPORT_PATH: ${{ runner.temp }}/collman-dba-report.json
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Check manual approval inputs and installed PostgreSQL 17 clients
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$COLLMAN_DBA_CHANGE_TICKET" || { echo "Missing change ticket"; exit 2; }
+          test -n "$COLLMAN_DBA_SOURCE_DIRECT_URL" || { echo "Missing protected source environment secret"; exit 2; }
+          if [ "$COLLMAN_DBA_OPERATION" = 'backup-restore' ]; then
+            test "$COLLMAN_DBA_ACK_RESTORE_EMPTY" = 'true' || { echo "Restore approval missing"; exit 2; }
+            test -n "$COLLMAN_DBA_RESTORE_DIRECT_URL" || { echo "Missing independent empty target secret"; exit 2; }
+            test -n "$COLLMAN_DBA_APPROVED_SOURCE_ID" || { echo "Prior inventory source_id required"; exit 2; }
+          fi
+          pg_dump --version
+          pg_restore --version
+          psql --version
+          node --version
+      - name: Install pinned driver without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run guarded read-only inventory or backup and restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          node scripts/dba-recovery.mjs "$COLLMAN_DBA_OPERATION"
+      - name: Publish safe metadata only to workflow summary
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          import {readFileSync} from 'node:fs';
+          const report=JSON.parse(readFileSync(process.env.COLLMAN_DBA_REPORT_PATH,'utf8'));
+          console.log('## CollMan DBA controlled recovery');
+          const fields=['status','mode','source_id','restore_id','backup_sha256','table_count','populated_tables','row_count','applied_versions','pending_versions','backup_retained'];
+          for(const field of fields)if(report[field]!==undefined)console.log('- '+field+': '+JSON.stringify(report[field]));
+          console.log('No backup archive is retained; separately approved encrypted retention is still required.');
+          NODE
