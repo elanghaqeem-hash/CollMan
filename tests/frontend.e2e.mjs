@@ -64,6 +64,17 @@ test('CollMan desktop and mobile browser: login, dashboard, register, navigation
     await page.locator('[data-nav="assets"]').click();
     await page.waitForSelector('.pagehead h1');
     assert.match(await page.locator('.pagehead h1').innerText(),/Agunan/i);
+    await page.locator('[data-action="new"]').click();
+    await page.locator('#collateral-type-search').fill('deposito');
+    await page.locator('[data-choose-collateral="Deposito"]').click();
+    assert.equal(await page.locator('#collateral-category').inputValue(),'CASH');
+    assert.equal(await page.locator('#asset-type').inputValue(),'Deposito');
+    await page.locator('#collateral-category').selectOption('VEHICLE');
+    assert.equal(await page.locator('#asset-type').inputValue(),'Mobil');
+    await page.locator('#collateral-type-search').fill('piutang');
+    await page.locator('[data-choose-collateral="Piutang Usaha"]').click();
+    assert.equal(await page.locator('#collateral-category').inputValue(),'RECEIVABLE');
+    await page.locator('[data-action="back-assets"]').first().click();
     await page.setViewportSize({width:390,height:844});
     await page.locator('[data-action="sidebar-toggle"]').click();
     await page.locator('[data-nav="dashboard"]').click();
