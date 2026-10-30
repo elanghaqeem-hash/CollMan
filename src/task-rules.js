@@ -14,7 +14,7 @@ export function parseInspectionDate(date){
  if(typeof date!=='string'||!ISO.test(date))throw problem('Tanggal inspeksi wajib YYYY-MM-DD.');
  const d=new Date(date+'T00:00:00.000Z');
  if(Number.isNaN(d.getTime())||d.toISOString().slice(0,10)!==date)throw problem('Tanggal inspeksi tidak valid.');
- if(d.getTime()>Date.now())throw problem('Tanggal inspeksi selesai tidak boleh di masa depan.');
+ if(date>todayWIB())throw problem('Tanggal inspeksi selesai tidak boleh di masa depan.');
  return d;
 }
 export function inspectionDeadline(date,excludedDates=[]){
