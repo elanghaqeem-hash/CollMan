@@ -3,7 +3,7 @@
   "version": 2,
   "framework": null,
   "outputDirectory": "public",
-  "buildCommand": "npm run build",
+  "buildCommand": "node scripts/diagnose-preview-db.mjs && npm run build",
   "rewrites": [
     {
       "source": "/api/:path*",
