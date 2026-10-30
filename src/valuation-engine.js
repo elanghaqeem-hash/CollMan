@@ -140,9 +140,19 @@ export function priceIndication(model,input,context){
 export function backtest(observations){
  const rows=list(observations,'Transaksi realization');
  if(rows.length<2)throw problem('Minimal dua observasi untuk statistik deskriptif; kecukupan validasi ditetapkan reviewer.');
- const refs=new Set(),errors=rows.map(r=>{
+ const refs=new Set(),dates=[],today=new Date().toISOString().slice(0,10);
+ let documentedPredictions=0;
+ const errors=rows.map(r=>{
   const ref=required(r.realization_ref,'Sumber transaksi / realization',500);if(refs.has(ref))throw problem('Observasi duplikat.');refs.add(ref);
-  validDate(r.realized_on,'Tanggal realization');
+  const realizedOn=validDate(r.realized_on,'Tanggal realization');
+  if(realizedOn>today)throw problem('Tanggal realisasi belum terjadi; observasi tidak boleh memakai hasil masa depan.');
+  dates.push(realizedOn);
+  if(r.predicted_on!==undefined||r.prediction_ref!==undefined){
+   const predictedOn=validDate(r.predicted_on,'Tanggal prediksi historis');
+   required(r.prediction_ref,'Referensi prediksi historis',500);
+   if(predictedOn>realizedOn)throw problem('Prediksi tidak boleh dibuat setelah realisasi.');
+   documentedPredictions++;
+  }
   const error=(numeric(r.predicted,'Prediksi')-numeric(r.actual,'Realisasi',Number.MIN_VALUE))/Number(r.actual);
   if(!Number.isFinite(error))throw problem('Rasio backtest melebihi batas angka aman.');
   return error;
@@ -158,5 +168,7 @@ export function backtest(observations){
   confidence_interval={level:.95,method:'PERCENTILE_BOOTSTRAP_IID',replicates:1000,mape_pct:interval(mape),bias_pct:interval(bias),limitation:'Assumes independent representative observations; does not establish segment coverage.'};
  }
  return {n,mape_pct:abs.reduce((s,x)=>s+x,0)/n*100,mdape_pct:(n%2?abs[(n-1)/2]:(abs[n/2-1]+abs[n/2])/2)*100,
-  bias_pct:errors.reduce((s,x)=>s+x,0)/n*100,confidence_interval,confidence_interval_status:confidence_interval?'DESCRIPTIVE_IID_ONLY':'NOT_ESTIMATED_INSUFFICIENT_DISTRIBUTIONAL_EVIDENCE'};
+  bias_pct:errors.reduce((s,x)=>s+x,0)/n*100,confidence_interval,confidence_interval_status:confidence_interval?'DESCRIPTIVE_IID_ONLY':'NOT_ESTIMATED_INSUFFICIENT_DISTRIBUTIONAL_EVIDENCE',
+  observation_period:{from:dates.slice().sort()[0],to:dates.slice().sort().at(-1)},
+  historical_prediction_evidence:documentedPredictions===n?'COMPLETE':'INCOMPLETE',documented_predictions:documentedPredictions};
 }
