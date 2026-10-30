@@ -79,16 +79,41 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   const compAgain=await call('POST','/api/assets/'+id+'/comparables',{description:'UAT comparable',offering_price:1200000000},maker);
   assert.equal(compAgain.status,201);
   assert.equal((await call('GET','/api/assets/'+id,undefined,checker)).data.comparables.length,1);
+  // Evidence metadata must persist, remain tenant-scoped, and be reviewable only by
+  // independent Checker/Reviewer at the correct workflow stage.
+  const ev=await call('POST','/api/assets/'+id+'/evidence',{
+    evidence_type:'LEGAL_DOCUMENT',source_name:'Test internal source',
+    reference_no:'UAT-LEGAL-001',notes:'For integration testing only'},maker);
+  assert.equal(ev.status,201,JSON.stringify(ev.data));
+  const evidenceId=ev.data.id;
+  assert.equal((await call('GET','/api/assets/'+id+'/evidence',undefined,auditor)).data.records.length,1);
+  assert.equal((await call('POST','/api/assets/'+id+'/evidence/'+evidenceId+'/review',
+    {decision:'REVIEWED_INTERNAL',note:'Recorded internally for test'},checker)).status,403);
+  assert.equal((await call('POST','/api/assets/'+id+'/evidence', {
+    evidence_type:'LEGAL_DOCUMENT',source_name:'Unauthorized',reference_no:'TEST'},auditor)).status,403);
   assert.equal((await call('POST','/api/assets/'+id+'/transition',{action:'APPROVE'},maker)).status,403);
   for(const [cookie,action,want] of [[maker,'SUBMIT','SUBMITTED'],[checker,'CHECK','REVIEWED'],[reviewer,'RECOMMEND','RECOMMENDED'],[approver,'APPROVE','APPROVED']]){
     const r=await call('POST','/api/assets/'+id+'/transition',{action},cookie);
     assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.status,want);
+    if(action==='SUBMIT'){
+      const reviewed=await call('POST','/api/assets/'+id+'/evidence/'+evidenceId+'/review',
+        {decision:'REVIEWED_INTERNAL',note:'Reviewed independent supporting evidence'},checker);
+      assert.equal(reviewed.status,200,JSON.stringify(reviewed.data));
+      assert.equal(reviewed.data.status,'REVIEWED_INTERNAL');
+      assert.equal((await call('POST','/api/assets/'+id+'/evidence/'+evidenceId+'/review',
+        {decision:'DISPUTED',note:'Attempt unauthorized second review'},checker)).status,403);
+      assert.equal((await call('POST','/api/assets/'+id+'/evidence/'+evidenceId+'/review',
+        {decision:'DISPUTED',note:'Maker self review attempt'},maker)).status,403);
+    }
   }
   assert.equal((await call('PUT','/api/assets/'+id,assetInfo,maker)).status,403);
   assert.equal((await call('POST','/api/assets/'+id+'/transition',{action:'APPROVE'},approver)).status,403);
   const final=await call('GET','/api/assets/'+id,undefined,auditor);
   assert.equal(final.status,200);
   assert.equal(final.data.history.length,4);
+  assert.equal(final.data.evidence.length,1);
+  assert.equal(final.data.evidence[0].review_status,'REVIEWED_INTERNAL');
+  assert.ok(final.data.evidence[0].reviewed_by_name);
   const dashboard=await call('GET','/api/dashboard',undefined,admin);
   assert.equal(dashboard.status,200);assert.equal(Number(dashboard.data.assets.approved_liquidation),750000000);
   const journal=await call('GET','/api/audit',undefined,auditor);
