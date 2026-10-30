@@ -6,7 +6,7 @@
   "description": "Collateral Management System — Vercel Functions and PostgreSQL migration",
   "scripts": {
     "check": "node scripts/check.mjs",
-    "test": "node --test tests/domain.test.mjs tests/frontend-static.test.mjs tests/postgres.test.mjs tests/login-readiness.test.mjs tests/integrations.test.mjs tests/evidence.test.mjs",
+    "test": "node --test tests/domain.test.mjs tests/frontend-static.test.mjs tests/postgres.test.mjs tests/login-readiness.test.mjs tests/integrations.test.mjs tests/evidence.test.mjs tests/task-rules.test.mjs",
     "build": "npm run check && npm test",
     "deploy": "npx --yes wrangler@4.155.0 deploy",
     "test:integration": "node --test tests/vercel-api.integration.test.mjs",
