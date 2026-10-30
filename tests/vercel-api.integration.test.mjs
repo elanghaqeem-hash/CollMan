@@ -58,6 +58,13 @@ test('CollMan PostgreSQL: auth, RBAC, SoD, approval journal and tenant isolation
   const created=await call('POST','/api/assets',assetInfo,maker);
   assert.equal(created.status,201,JSON.stringify(created.data));
   const id=created.data.id;
+  const financial=await call('POST','/api/assets',{...assetInfo,asset_type:'Deposito',land_area:0,building_area:0},maker);
+  assert.equal(financial.status,201,JSON.stringify(financial.data));
+  const financialDetails=await call('GET','/api/assets/'+financial.data.id,undefined,maker);
+  assert.equal(financialDetails.data.asset.asset_type,'Deposito');
+  assert.equal(financialDetails.data.asset.status,'DRAFT');
+  const wrongWorkflow=await call('POST','/api/assets/'+financial.data.id+'/transition',{action:'SUBMIT'},maker);
+  assert.equal(wrongWorkflow.status,409,'Non-property cannot bypass specialized appraisal workflow');
   assert.equal((await call('PUT','/api/assets/'+id,assetInfo,maker)).status,200);
   const list=await call('GET','/api/assets?q=UAT',undefined,maker);
   assert.equal(list.status,200);
