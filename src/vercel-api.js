@@ -305,6 +305,11 @@ async function api(request,env,db){
         const val=await row(db,'SELECT market_value FROM appraisals WHERE tenant_id=? AND asset_id=?',actor.tenant_id,id);
         guard(val&&val.market_value>0,'Nilai pasar harus diisi sebelum submit.');
       }
+      if(action==='APPROVE'){
+        const exceptions=await row(db,`SELECT COUNT(*) AS total FROM asset_evidence WHERE tenant_id=? AND asset_id=?
+          AND review_status<>'REVIEWED_INTERNAL'`,actor.tenant_id,id);
+        guard(Number(exceptions.total)===0,'Persetujuan ditahan: masih ada bukti pending atau disputed.');
+      }
       if(action==='RETURN'||action==='REJECT')guard(note.length>=5,'Alasan minimal 5 karakter diperlukan.');
       await db.transaction(async tx=>{
         const update=await tx.prepare(`UPDATE assets SET status=?,updated_at=datetime('now') WHERE id=? AND tenant_id=? AND status=?`).bind(next,id,actor.tenant_id,asset.status).run();
