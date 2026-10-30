@@ -1,4 +1,5 @@
 import {escapeText, currency, riskLabels, statusText, actionText} from './helpers.js';
+import {collateralCategories,groupForType,typesInGroup,searchCollateralTypes} from './collateral-picker.js';
 import {requestApi as api,validateMetadata} from './api-client.js';
 const app=document.getElementById('app');
 const state={user:null,needSetup:false,configError:'',view:'dashboard',dashboard:null,list:null,detail:null,settings:null,users:null,audit:null,search:'',status:'',edit:false,mobile:false,busy:false};
@@ -55,10 +56,29 @@ function dashboard(){const s=state.dashboard||{assets:{total:0,approved_market:0
 function assets(){const data=state.list||{records:[],total:0};return head('DATA MASTER','Register Agunan',`${data.total} agunan sesuai filter yang dipilih.`,(state.user.role==='MAKER'||state.user.role==='ADMIN')?btn('new','+ &nbsp; Tambah Agunan','primary'):'')+
  `<div class="card"><div class="filters"><input id="search" placeholder="Cari nomor referensi, debitur, atau alamat…" value="${esc(state.search)}"><select id="status-filter" class="field" style="max-width:210px"><option value="">Semua status</option>${Object.entries(statusText).map(([k,v])=>`<option value="${k}" ${state.status===k?'selected':''}>${v}</option>`).join('')}</select><button class="btn" data-action="filter">Cari</button><button class="btn" data-action="export-csv">↓ CSV halaman ini</button></div>${data.records.length?table(['Nomor Agunan','Debitur / Jenis','Lokasi','Nilai Pasar','Status','Diperbarui'],data.records.map(assetRow)):empty('Tidak ada data','Sesuaikan filter atau tambahkan agunan baru.')}
  <div class="small muted" style="margin-top:16px">Menampilkan maksimal 50 data terbaru. Total hasil: ${data.total}.</div></div>`;}
-function assetForm(){const a=state.edit?state.detail?.asset:null;const input=(name,label,type='text',extra='')=>`<div class="form-group"><label>${label}</label><input class="field" name="${name}" type="${type}" value="${esc(a?.[name]??'')}" ${extra}></div>`;
+function collateralOptionRows(category,selected=''){
+ return typesInGroup(category).map(item=>'<option value="'+esc(item.name)+'" '+(item.name===selected?'selected':'')+'>'+esc(item.name)+'</option>').join('');
+}
+function collateralCategoryOptions(selected){
+ return collateralCategories.map(g=>'<option value="'+esc(g.code)+'" '+(g.code===selected?'selected':'')+'>'+esc(g.name)+'</option>').join('');
+}
+function updateCollateralSearchResults(query){
+ const container=document.getElementById('collateral-type-results'),input=document.getElementById('collateral-type-search');
+ if(!container||!input)return;
+ const hits=searchCollateralTypes(query);
+ if(query.trim().length<2){container.hidden=true;container.innerHTML='';input.setAttribute('aria-expanded','false');return;}
+ container.hidden=false;input.setAttribute('aria-expanded','true');
+ container.innerHTML=hits.length?hits.map(t=>'<button type="button" class="collateral-result" data-choose-collateral="'+esc(t.name)+'">'+
+  '<strong>'+esc(t.name)+'</strong><span>'+esc(collateralCategories.find(g=>g.code===t.group)?.name||t.group)+'</span></button>').join(''):
+  '<p class="small muted" role="status">Tidak ada jenis cocok. Pilih kategori atau gunakan Lainnya dan tulis penjelasan di catatan.</p>';
+}
+function assetForm(){const a=state.edit?state.detail?.asset:null;const selectedType=a?.asset_type||'Tanah Kosong',selectedCategory=groupForType(selectedType);const input=(name,label,type='text',extra='')=>`<div class="form-group"><label>${label}</label><input class="field" name="${name}" type="${type}" value="${esc(a?.[name]??'')}" ${extra}></div>`;
  return head('REGISTER AGUNAN',a?'Perbarui Data Agunan':'Tambah Agunan Baru','Pastikan informasi legalitas sesuai dokumen resmi.',btn('back-assets','← Kembali'))+
  `<form id="asset-form" class="card"><h2>Identitas dan Legalitas</h2><div class="formgrid">${input('borrower','Nama debitur *','text','required maxlength="200"')}
- <div class="form-group"><label>Jenis agunan *</label><select class="field" name="asset_type" required>${['Tanah Kosong','Rumah Tinggal','Ruko','Gudang','Pabrik','Kios','Apartemen','Lainnya'].map(t=>`<option ${a?.asset_type===t?'selected':''}>${t}</option>`).join('')}</select></div>
+ <div class="form-group wide"><label for="collateral-type-search">Cari jenis agunan</label><input id="collateral-type-search" class="field" type="search" autocomplete="off" placeholder="Cari: rumah, deposito, emas, kendaraan, piutang…" aria-controls="collateral-type-results" aria-expanded="false"><p class="small muted">Cari minimal 2 karakter, atau pilih kategori dan jenis di bawah.</p><div id="collateral-type-results" class="collateral-result-list" hidden></div></div>
+ <div class="form-group"><label for="collateral-category">Kategori agunan *</label><select id="collateral-category" class="field">${collateralCategoryOptions(selectedCategory)}</select></div>
+ <div class="form-group"><label for="asset-type">Jenis agunan *</label><select id="asset-type" class="field" name="asset_type" required>${collateralOptionRows(selectedCategory,selectedType)}</select></div>
+ <div class="form-group wide"><p class="small muted">Semua kategori dapat dicatat sebagai Draft. Jenis selain tanah/bangunan belum dapat disubmit melalui workflow appraisal dasar dan memerlukan modul CollMan Enterprise, kajian legal, pengikatan, serta penilaian sesuai kebijakan bank.</p></div>
  <div class="form-group wide"><label>Alamat objek agunan *</label><textarea name="address" class="field" required maxlength="500">${esc(a?.address??'')}</textarea></div>
  ${input('certificate_type','Jenis bukti hak (SHM / HGB / dll.)','text','maxlength="50"')}${input('certificate_no','Nomor sertifikat','text','maxlength="100"')}
  ${input('nib','NIB sertifikat','text','maxlength="100"')}${input('ownership_name','Nama pemegang hak','text','maxlength="150"')}
@@ -123,7 +143,31 @@ async function onSubmit(event){const form=event.target;if(!form.id)return;event.
   }
  }catch(e){notify(e.message,true);}finally{if(b)b.disabled=false;}}
 async function navigate(view){state.mobile=false;state.view=view;state.edit=false;if(view==='assetform'){renderShell();return;}await loadView();}
-async function onClick(event){const nav=event.target.closest('[data-nav]');if(nav){await navigate(nav.dataset.nav);return;}
+function onAssetPickerInput(event){
+ if(event.target?.id==='collateral-type-search')updateCollateralSearchResults(event.target.value);
+}
+function onAssetPickerChange(event){
+ if(event.target?.id!=='collateral-category')return;
+ const category=event.target.value;
+ const select=document.getElementById('asset-type');
+ if(!select)return;
+ select.innerHTML=collateralOptionRows(category);
+ updateCollateralSearchResults('');
+ const search=document.getElementById('collateral-type-search');
+ if(search)search.value='';
+}
+async function onClick(event){
+ const chosen=event.target.closest('[data-choose-collateral]');
+ if(chosen){
+  const name=chosen.dataset.chooseCollateral,category=groupForType(name);
+  const groupSelect=document.getElementById('collateral-category'),typeSelect=document.getElementById('asset-type');
+  if(!groupSelect||!typeSelect)return;
+  groupSelect.value=category;typeSelect.innerHTML=collateralOptionRows(category,name);typeSelect.value=name;
+  const search=document.getElementById('collateral-type-search');if(search)search.value=name;
+  const results=document.getElementById('collateral-type-results');if(results){results.hidden=true;results.innerHTML='';}
+  search?.setAttribute('aria-expanded','false');typeSelect.focus();return;
+ }
+ const nav=event.target.closest('[data-nav]');if(nav){await navigate(nav.dataset.nav);return;}
  const open=event.target.closest('[data-open]');if(open){state.detail={asset:{id:open.dataset.open}};await navigate('asset');return;}
  const action=event.target.closest('[data-action]')?.dataset.action;
  if(action){
@@ -149,4 +193,4 @@ async function onClick(event){const nav=event.target.closest('[data-nav]');if(na
  const toggle=event.target.closest('[data-toggle-user]');if(toggle){const active=toggle.dataset.active!=='1';if(!window.confirm(active?'Aktifkan pengguna ini?':'Nonaktifkan pengguna ini?'))return;
   try{await api(`/api/users/${toggle.dataset.toggleUser}`,{method:'PUT',body:{active,role:toggle.dataset.role}});await loadView();notify('Status pengguna diperbarui.');}catch(e){notify(e.message,true);}return;}
 }
-document.addEventListener('submit',onSubmit);document.addEventListener('click',onClick);init();
+document.addEventListener('submit',onSubmit);document.addEventListener('click',onClick);document.addEventListener('input',onAssetPickerInput);document.addEventListener('change',onAssetPickerChange);init();

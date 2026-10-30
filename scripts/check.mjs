@@ -1,6 +1,6 @@
 import {existsSync, readFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
-for(const path of ['src/index.js','src/domain.js','src/schema.js','public/index.html','public/app.js','public/styles.css','migrations/0001_initial.sql','wrangler.jsonc','src/vercel-api.js','src/postgres.js','api/index.js','migrations/postgres/0001_initial.sql','migrations/postgres/0002_tenant_integrity.sql','migrations/postgres/0003_audit_immutability.sql','migrations/postgres/0004_financial_integrity.sql','scripts/check-db.mjs','scripts/verify-preview.mjs','vercel.json']){
+for(const path of ['src/index.js','src/domain.js','public/collateral-catalog.js','public/collateral-picker.js','src/schema.js','public/index.html','public/app.js','public/styles.css','migrations/0001_initial.sql','wrangler.jsonc','src/vercel-api.js','src/postgres.js','api/index.js','migrations/postgres/0001_initial.sql','migrations/postgres/0002_tenant_integrity.sql','migrations/postgres/0003_audit_immutability.sql','migrations/postgres/0004_financial_integrity.sql','scripts/check-db.mjs','scripts/verify-preview.mjs','vercel.json']){
  if(!existsSync(path)) throw new Error(`Missing required path: ${path}`);
 }
 for(const path of ['src/index.js','src/domain.js','src/schema.js','public/app.js','src/vercel-api.js','src/postgres.js','api/index.js','scripts/migrate-postgres.mjs','scripts/check-db.mjs','scripts/verify-preview.mjs']) execFileSync(process.execPath,['--check',path]);

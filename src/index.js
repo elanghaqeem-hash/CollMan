@@ -1,6 +1,6 @@
 import {DurableObject} from 'cloudflare:workers';
 import {INITIAL_SCHEMA} from './schema.js';
-import {ROLES, RISK_FLAGS, STATUS_LABELS, ACTIONS, validateAsset, calculateValuation, nextWorkflow, numberIn, required, optional, problem} from './domain.js';
+import {ROLES, RISK_FLAGS, STATUS_LABELS, ACTIONS, validateAsset, calculateValuation, mayUseLegacyAppraisal, nextWorkflow, numberIn, required, optional, problem} from './domain.js';
 
 const COOKIE = 'collman_session';
 const JSON_HEADERS = {'content-type':'application/json; charset=utf-8','cache-control':'no-store'};
@@ -207,6 +207,7 @@ async function api(request,env,db){
       const next=nextWorkflow(action,asset.status,actor.role,asset.created_by,actor.id);
       if(action==='SUBMIT'){
         guard((actor.role==='ADMIN'||asset.created_by===actor.id),'Hanya Maker pemilik tugas dapat mengirim agunan.');
+        guard(mayUseLegacyAppraisal(asset.asset_type),'Jenis agunan ini dapat dicatat sebagai Draft, tetapi penilaian dan approval memerlukan formulir dan workflow khusus pada CollMan Enterprise.',409);
         guard(asset.legal_status!=='BELUM_DIVERIFIKASI','Status legalitas harus diperiksa sebelum submit.');
         const val=await row(db,'SELECT market_value FROM appraisals WHERE tenant_id=? AND asset_id=?',actor.tenant_id,id);
         guard(val&&val.market_value>0,'Nilai pasar harus diisi sebelum submit.');
