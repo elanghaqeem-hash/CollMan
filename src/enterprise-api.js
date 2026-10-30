@@ -39,6 +39,11 @@ export async function enterpriseRoutes(request,db,actor,{readBody,audit}){
    }else if(action==='approve'){
     guard(actor.role==='APPROVER'&&actor.id!==m.created_by&&actor.id!==m.reviewed_by,'Sign-off model wajib Approver independen.');
     guard(m.status==='REVIEWED','Model belum direview independen.',409);
+    // Descriptive error statistics are not proof of independent historical forecasting.
+    // A validated model must have a dated, referenced prediction for every realized observation.
+    const validation=typeof m.validation==='string'?JSON.parse(m.validation):m.validation;
+    guard(validation?.metrics?.historical_prediction_evidence==='COMPLETE',
+     'Validasi membutuhkan tanggal dan referensi prediksi historis sebelum setiap realisasi.',409);
     await run(tx,"UPDATE valuation_models SET status='VALIDATED',approved_by=?,approval_ref=? WHERE id=? AND tenant_id=?",actor.id,ref,id,actor.tenant_id);
    }else{
     guard(actor.role==='APPROVER'&&m.status==='VALIDATED','Hanya Approver dapat menangguhkan model tervalidasi.');
