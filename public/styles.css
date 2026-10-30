@@ -17,3 +17,11 @@
   .card-head{min-width:0;flex-wrap:wrap}
   .tablewrap{min-width:0;max-width:100%;overflow-x:auto}
 }
+
+/* Searchable grouped collateral picker: compact on phones; retains native <select> accessibility. */
+.collateral-result-list{display:grid;gap:4px;margin-top:9px;padding:6px;border:1px solid var(--line);border-radius:10px;max-height:250px;overflow-y:auto;background:#fff;box-shadow:var(--shadow)}
+.collateral-result-list[hidden]{display:none}
+.collateral-result{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;border:0;background:white;text-align:left;border-radius:7px;padding:11px 12px;color:var(--text);min-height:44px}
+.collateral-result:hover,.collateral-result:focus-visible{background:#e9f6f3;outline:2px solid var(--cyan);outline-offset:-2px}
+.collateral-result span{color:var(--muted);font-size:12px;text-align:right}
+@media(max-width:780px){.collateral-result{align-items:flex-start;flex-direction:column;gap:4px}.collateral-result span{text-align:left}}
