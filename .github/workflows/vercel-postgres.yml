@@ -52,6 +52,10 @@ jobs:
         run: npm run db:verify
       - name: API integration (RBAC, segregation of duties, approvals, audit, tenant)
         run: npm run test:integration
+      - name: Every collateral category and enterprise API on real PostgreSQL
+        run: node --test tests/collateral-api.test.mjs tests/enterprise-api.test.mjs
+        env:
+          COLLMAN_REAL_PG_ISOLATED: '1'
       - name: Standalone Node HTTP handler smoke test
         run: node --test tests/vercel-handler.integration.test.mjs
       - name: Install headless Chromium for frontend UAT

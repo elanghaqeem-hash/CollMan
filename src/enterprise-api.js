@@ -31,7 +31,7 @@ export async function enterpriseRoutes(request,db,actor,{readBody,audit}){
     guard(actor.role==='REVIEWER'&&actor.id!==m.created_by,'Validasi wajib Reviewer independen.');
     guard(m.status==='DRAFT','Model sudah direview.',409);
     // References and observations stay tenant-private. These are descriptive metrics, never automatic validation.
-    guard(Array.isArray(body.observations)&&body.observations.every(o=>o.category===m.category&&o.region===m.region),'Observasi harus sesuai kategori dan wilayah model.',400);
+    guard(Array.isArray(body.observations)&&body.observations.every(o=>o&&o.category===m.category&&o.region===m.region),'Observasi harus sesuai kategori dan wilayah model.',400);
     const metrics=backtest(body.observations);
     const note=required(body.note,'Kesimpulan validasi dan keterbatasan segmen',2000);
     await run(tx,"UPDATE valuation_models SET status='REVIEWED',reviewed_by=?,review_ref=?,validation=? WHERE id=? AND tenant_id=?",

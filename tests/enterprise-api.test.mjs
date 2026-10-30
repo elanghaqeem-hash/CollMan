@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {isolatedDatabase} from './pglite-harness.mjs';
+import {isolatedDatabase} from './isolated-enterprise-db.mjs';
 import {handleCollManApi} from '../src/vercel-api.js';
 import {completeAsset,valuationInput} from './collateral-fixtures.mjs';
 async function fixture(){
@@ -28,6 +28,7 @@ test('governed model versions, independent signoff, append-only runs, tenant and
   assert.equal((await api('APPROVER','POST','/api/models/'+id+'/approve',{reference:'Synthetic approval'})).status,409);
   const review={reference:'Synthetic validation',note:'Synthetic review; no bank signoff implied',observations:[{category:'CASH',region:'TEST_REGION',predicted:100,actual:100,realized_on:'2026-10-01',realization_ref:'Synthetic A'},{category:'CASH',region:'TEST_REGION',predicted:100,actual:110,realized_on:'2026-10-01',realization_ref:'Synthetic B'}]};
   assert.equal((await api('ADMIN','POST','/api/models/'+id+'/review',review)).status,403);
+  assert.equal((await api('REVIEWER','POST','/api/models/'+id+'/review',{...review,observations:[null]})).status,400);
   assert.equal((await api('REVIEWER','POST','/api/models/'+id+'/review',review)).status,200);
   assert.equal((await api('APPROVER','POST','/api/models/'+id+'/approve',{reference:'Synthetic approval'})).status,200);
   await assert.rejects(db.prepare('UPDATE valuation_models SET parameters=? WHERE id=?').bind('{}',id).run(),{code:'23514'});
@@ -71,5 +72,29 @@ test('facility coverage prevents double counting, requires bank acceptance and i
   await assert.rejects(db.prepare('DELETE FROM collateral_allocations WHERE id=?').bind(first.body.id).run(),{code:'23514'});
   assert.equal((await api(null,'GET','/api/facilities')).status,401);
   assert.equal((await api('ADMIN','POST','/api/allocations',{asset_id:'foreign',facility_id:facilities[0],amount_idr:1,basis_ref:'Unknown asset'})).status,404);
+  await db.prepare('INSERT INTO tenants(id,name) VALUES (?,?)').bind('foreign-tenant','Synthetic other tenant').run();
+  await db.prepare('INSERT INTO users(id,tenant_id,email,display_name,role,password_hash,password_salt) VALUES (?,?,?,?,?,?,?)').bind('foreign-user','foreign-tenant','foreign@test.invalid','Foreign synthetic','MAKER','0'.repeat(64),'0'.repeat(32)).run();
+  await db.prepare('INSERT INTO facilities(id,tenant_id,reference_no,borrower_ref,branch_code,exposure_idr,created_by) VALUES(?,?,?,?,?,?,?)').bind('foreign-facility','foreign-tenant','FOREIGN','Synthetic','SYN',100,'foreign-user').run();
+  assert.equal((await api('ADMIN','PUT','/api/facilities/foreign-facility',{exposure_idr:1})).status,404);
+  assert.equal((await api('MAKER','POST','/api/allocations',{asset_id:aid,facility_id:'foreign-facility',amount_idr:1,basis_ref:'Foreign tenant rejected'})).status,404);
+  await assert.rejects(db.prepare('INSERT INTO collateral_allocations(id,tenant_id,asset_id,facility_id,amount_idr,basis_ref,created_by) VALUES(?,?,?,?,?,?,?)').bind('foreign-link','tenant-a',aid,'foreign-facility',1,'Forbidden cross tenant','MAKER').run(),{code:'23503'});
+ }finally{await engine.close();}
+});
+test('real PostgreSQL competing allocation approvals serialize at the collateral ceiling',{skip:process.env.COLLMAN_REAL_PG_ISOLATED!=='1'},async()=>{
+ const {engine,api}=await fixture();try{
+  const asset=await api('MAKER','POST','/api/assets',completeAsset('Deposito')),path='/api/assets/'+asset.body.id;
+  assert.equal((await api('MAKER','PUT',path+'/appraisal',valuationInput('NOMINAL'))).status,200);
+  const val=(await api('MAKER','GET',path)).body.appraisal,limit=val.liquidation_value;
+  for(const [role,action] of [['MAKER','SUBMIT'],['CHECKER','CHECK'],['REVIEWER','RECOMMEND']])assert.equal((await api(role,'POST',path+'/transition',{action})).status,200);
+  assert.equal((await api('CHECKER','PUT',path+'/eligibility',{eligibility_status:'ELIGIBLE',eligibility_notes:'Synthetic bank review',bank_accepted_value:limit,bank_policy_ref:'Synthetic policy'})).status,200);
+  assert.equal((await api('APPROVER','POST',path+'/transition',{action:'APPROVE'})).status,200);
+  const pending=[];
+  for(let i=0;i<2;i++){
+   const f=await api('MAKER','POST','/api/facilities',{reference_no:'SYN-RACE-'+i,borrower_ref:'Synthetic',branch_code:'SYN',exposure_idr:limit});
+   const a=await api('MAKER','POST','/api/allocations',{asset_id:asset.body.id,facility_id:f.body.id,amount_idr:limit,basis_ref:'Synthetic competing requests'});assert.equal(a.status,201);pending.push(a.body.id);
+  }
+  const results=await Promise.all(pending.map(id=>api('APPROVER','POST','/api/allocations/'+id+'/approve',{})));
+  assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
+  const allocated=(await api('AUDITOR','GET','/api/facilities')).body.records.reduce((sum,f)=>sum+Number(f.allocated_idr),0);assert.equal(allocated,limit);
  }finally{await engine.close();}
 });

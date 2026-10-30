@@ -40,6 +40,7 @@ test('backtesting computes MAPE, MdAPE and signed bias without inventing confide
  const r=backtest([{predicted:110,actual:100,realized_on:'2026-10-01',realization_ref:'Synthetic transaction A'},{predicted:180,actual:200,realized_on:'2026-10-02',realization_ref:'Synthetic transaction B'}]);
  assert.equal(r.mape_pct,10);assert.equal(r.mdape_pct,10);assert.equal(r.bias_pct,0);assert.equal(r.confidence_interval,null);
  assert.throws(()=>backtest([{predicted:10,actual:0,realized_on:'2026-10-01',realization_ref:'a'},{predicted:10,actual:10,realized_on:'2026-10-01',realization_ref:'b'}]));
+ assert.throws(()=>backtest([{predicted:9e15,actual:Number.MIN_VALUE,realized_on:'2026-10-01',realization_ref:'a'},{predicted:10,actual:10,realized_on:'2026-10-01',realization_ref:'b'}]));
 });
 test('reconciliation uses explicit independent approach indications and weights',()=>{
  const r=priceIndication(model('RECONCILIATION'),{...common,approaches:[{method:'PROPERTY_COST',indicated_value:100,weight:.4,reconciliation_basis:'Synthetic reliability assessment',source},{method:'INCOME_CAP',indicated_value:200,weight:.6,reconciliation_basis:'Synthetic income evidence',source}]},ctx);

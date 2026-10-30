@@ -143,7 +143,9 @@ export function backtest(observations){
  const refs=new Set(),errors=rows.map(r=>{
   const ref=required(r.realization_ref,'Sumber transaksi / realization',500);if(refs.has(ref))throw problem('Observasi duplikat.');refs.add(ref);
   validDate(r.realized_on,'Tanggal realization');
-  return (numeric(r.predicted,'Prediksi')-numeric(r.actual,'Realisasi',Number.MIN_VALUE))/Number(r.actual);
+  const error=(numeric(r.predicted,'Prediksi')-numeric(r.actual,'Realisasi',Number.MIN_VALUE))/Number(r.actual);
+  if(!Number.isFinite(error))throw problem('Rasio backtest melebihi batas angka aman.');
+  return error;
  });
  const abs=errors.map(Math.abs).sort((a,b)=>a-b),n=rows.length;
  let confidence_interval=null;

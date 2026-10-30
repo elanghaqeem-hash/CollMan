@@ -7,12 +7,12 @@ const source=new pg.Pool({connectionString:original.href}),target=new pg.Pool({c
 async function inventory(pool){
  const client=await pool.connect();try{
   await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-  const tables=(await client.query("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")).rows;
+  const tables=(await client.query("SELECT schemaname,tablename FROM pg_tables WHERE schemaname='public' OR schemaname LIKE 'enterprise_ci_%' ORDER BY schemaname,tablename")).rows;
   const output=[];
-  for(const {tablename} of tables){
-   if(!/^[a-z_]+$/.test(tablename))throw new Error('Unexpected table identifier');
-   const values=(await client.query(`SELECT to_jsonb(t)::text AS value FROM "${tablename}" t ORDER BY to_jsonb(t)::text`)).rows;
-   output.push({table:tablename,count:values.length,sha256:createHash('sha256').update(values.map(r=>r.value).join('\n')).digest('hex')});
+  for(const {schemaname,tablename} of tables){
+   if(!/^[a-z0-9_]+$/.test(tablename)||!/^(public|enterprise_ci_[a-f0-9]+)$/.test(schemaname))throw new Error('Unexpected schema/table identifier');
+   const values=(await client.query(`SELECT to_jsonb(t)::text AS value FROM "${schemaname}"."${tablename}" t ORDER BY to_jsonb(t)::text`)).rows;
+   output.push({schema:schemaname,table:tablename,count:values.length,sha256:createHash('sha256').update(values.map(r=>r.value).join('\n')).digest('hex')});
   }
   await client.query('COMMIT');return output;
  }finally{client.release();}
